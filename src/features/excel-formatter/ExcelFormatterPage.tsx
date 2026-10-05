@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { bestSheet, excel } from '../../shared/excel/client.ts'
-import type { HeaderInfo, TableData } from '../../shared/excel/reader.ts'
+import { assertFileSize, type HeaderInfo, type TableData } from '../../shared/excel/reader.ts'
 import { Button, Card, downloadBlob, Field, inputClass, Notice, usePersisted } from '../../shared/ui/ui.tsx'
 import { applySteps, csvSafe, describe, OP_LABELS, type FilterOp, type Step } from './formatter.ts'
 
@@ -141,6 +141,7 @@ export default function ExcelFormatterPage() {
   async function onFile(f: File) {
     setError('')
     try {
+      assertFileSize(f.size)
       const names = await excel.open(await f.arrayBuffer())
       setFile({ name: f.name })
       setSheets(names)

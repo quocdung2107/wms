@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { bestSheet, excel } from '../../shared/excel/client.ts'
 import {
-  colLetter, resolveMapping, STD_FIELDS, suggestMapping,
+  assertFileSize, colLetter, resolveMapping, STD_FIELDS, suggestMapping,
   type Column, type ExtractResult, type HeaderInfo, type Mapping, type StdField,
 } from '../../shared/excel/reader.ts'
 import { FIELD_LABELS } from '../../shared/inventory/labels.ts'
@@ -42,6 +42,7 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
     let alive = true
     ;(async () => {
       try {
+        assertFileSize(file.size)
         const names = await excel.open(await file.arrayBuffer())
         if (!alive) return
         setSheetNames(names)

@@ -77,7 +77,18 @@ export function serialToIso(serial: number): string {
   return hasTime ? `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` : date
 }
 
+export const MAX_FILE_BYTES = 20 * 1024 * 1024
+
+/** Ném lỗi tiếng Việt nếu file lớn hơn 20 MB (đúng 20 MB vẫn qua). */
+export function assertFileSize(size: number): void {
+  if (size > MAX_FILE_BYTES) {
+    const mb = (size / 1048576).toFixed(1).replace('.', ',')
+    throw new Error(`File ${mb} MB vượt giới hạn 20 MB. Hãy tách nhỏ file rồi nạp lại.`)
+  }
+}
+
 export function readWorkbook(buf: ArrayBuffer | Uint8Array): SheetData[] {
+  assertFileSize(buf.byteLength)
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
   const isBinary = (bytes[0] === 0x50 && bytes[1] === 0x4b) || (bytes[0] === 0xd0 && bytes[1] === 0xcf)
   // CSV: giải mã UTF-8 rồi đọc chuỗi, giữ nguyên mã dạng text (không đoán kiểu số)
