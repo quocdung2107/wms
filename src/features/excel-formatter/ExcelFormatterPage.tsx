@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { bestSheet, excel } from '../../shared/excel/client.ts'
 import type { HeaderInfo, TableData } from '../../shared/excel/reader.ts'
 import { Button, Card, downloadBlob, Field, inputClass, Notice, usePersisted } from '../../shared/ui/ui.tsx'
-import { applySteps, describe, OP_LABELS, type FilterOp, type Step } from './formatter.ts'
+import { applySteps, csvSafe, describe, OP_LABELS, type FilterOp, type Step } from './formatter.ts'
 
 type StepType = Step['type']
 const TYPE_LABELS: Record<StepType, string> = {
@@ -155,11 +155,13 @@ export default function ExcelFormatterPage() {
   async function exportFile(kind: 'xlsx' | 'csv') {
     if (!result) return
     const XLSX = await import('xlsx')
-    const ws = XLSX.utils.aoa_to_sheet([result.table.headers, ...result.table.rows])
+    const { headers, rows } = result.table
     const base = (file?.name ?? 'bang').replace(/\.[^.]+$/, '') + '-da-xu-ly'
     if (kind === 'csv') {
+      const ws = XLSX.utils.aoa_to_sheet([headers.map(csvSafe), ...rows.map((r) => r.map(csvSafe))])
       downloadBlob(`${base}.csv`, '﻿' + XLSX.utils.sheet_to_csv(ws), 'text/csv;charset=utf-8')
     } else {
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
       downloadBlob(`${base}.xlsx`, XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

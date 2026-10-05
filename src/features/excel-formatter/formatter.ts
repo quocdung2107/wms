@@ -26,6 +26,11 @@ export const OP_LABELS: Record<FilterOp, string> = {
   nonempty: 'không trống',
 }
 
+// Chống CSV injection: chuỗi bắt đầu bằng ký tự Excel coi là công thức → thêm ' ở đầu.
+const CSV_DANGER = /^[=+\-@\t\r]/
+export const csvSafe = (v: Cell): Cell =>
+  typeof v === 'string' && CSV_DANGER.test(v) ? "'" + v : v
+
 const text = (v: Cell) => (v === null ? '' : String(v))
 const num = (v: Cell): number | null => {
   if (typeof v === 'number') return v
