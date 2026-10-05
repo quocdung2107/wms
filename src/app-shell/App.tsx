@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 
 const OrdersPage = lazy(() => import('../features/orders/OrdersPage.tsx'))
+const CarriersPage = lazy(() => import('../features/carriers/CarriersPage.tsx'))
 const AccountPage = lazy(() => import('../features/orders/AccountPage.tsx'))
 
 const TABS = [
@@ -105,7 +106,9 @@ export default function App() {
             <AccountPage />
           </Suspense>
         ) : (
-          <p className="text-slate-600">Chưa làm — thuộc phase sau.</p>
+          <Suspense fallback={<p className="text-slate-600">Đang tải…</p>}>
+            <CarriersPage />
+          </Suspense>
         )}
       </main>
     </div>
