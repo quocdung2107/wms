@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui'
 import { Chat } from './Chat'
-import { rpc, sb } from './api'
-import { ago, fmtTime } from './format'
+import { errText, rpc, sb } from './api'
+import { ago, fmtDay, fmtTime } from './format'
 import { NoteAction } from './NoteAction'
 import { AttentionBadge, StatusBadge, STATUSES, statusOf } from './status'
 import type { GroupCtx, Order, OrderEvent } from './types'
@@ -31,7 +31,7 @@ function describe(e: OrderEvent, ctx: GroupCtx): string {
   }
 }
 
-export function OrderDetail({ ctx, orderId, onClose }: { ctx: GroupCtx; orderId: string; onClose: () => void }) {
+export function OrderDetail({ ctx, orderId, onClose, backLabel = '← Danh sách đơn', backAlways = false }: { ctx: GroupCtx; orderId: string; onClose: () => void; backLabel?: string; backAlways?: boolean }) {
   const data = useLoad(async () => {
     const [o, ev] = await Promise.all([
       sb().from('orders_view').select('*').eq('id', orderId).single(),
@@ -48,6 +48,7 @@ export function OrderDetail({ ctx, orderId, onClose }: { ctx: GroupCtx; orderId:
 
   const [assignee, setAssignee] = useState<string | null>(null)
   const [status, setStatus] = useState('')
+  const [shared, setShared] = useState('')
 
   if (data.error) return <Notice kind="error">Không tải được đơn.</Notice>
   if (!data.data) return <p className="text-slate-600">Đang tải…</p>
@@ -63,18 +64,57 @@ export function OrderDetail({ ctx, orderId, onClose }: { ctx: GroupCtx; orderId:
 
   return (
     <div className="space-y-4">
-      <Button onClick={onClose} className="lg:hidden">
-        ← Danh sách đơn
+      <Button onClick={onClose} className={backAlways ? '' : 'lg:hidden'}>
+        {backLabel}
       </Button>
 
       <Card className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm text-slate-600">{order.code}</span>
           <StatusBadge code={order.status} />
+          {order.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
           <AttentionBadge reason={order.attention_reason} />
         </div>
-        <h2 className="text-xl font-bold">{order.title}</h2>
-        {order.details && <p className="whitespace-pre-wrap break-words text-slate-800">{order.details}</p>}
+        <h2 className="text-xl font-bold">{order.goods}</h2>
+        <dl className="grid gap-x-4 gap-y-1 text-slate-800 sm:grid-cols-2">
+          <div>
+            Tải trọng: <b>{order.weight_kg} kg</b>
+          </div>
+          <div>
+            Số kiện: <b>{order.packages}</b>
+          </div>
+          <div>
+            Nhận hàng: <b>{fmtDay(order.pickup_at)}</b>
+            {order.pickup_address && ` · ${order.pickup_address}`}
+          </div>
+          <div>
+            Giao hàng: <b>{fmtDay(order.delivery_at)}</b>
+            {order.delivery_address && ` · ${order.delivery_address}`}
+          </div>
+          {(order.contact_name || order.contact_phone) && (
+            <div>
+              Liên hệ: <b>{order.contact_name}</b>{' '}
+              {order.contact_phone && (
+                <a className="text-teal-800 underline" href={`tel:${order.contact_phone}`}>
+                  {order.contact_phone}
+                </a>
+              )}
+            </div>
+          )}
+        </dl>
+        {ctx.canWork && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={async () => {
+                const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, sender_id: ctx.me, shared_order_id: orderId, body: `${order.code} — ${order.goods}`.slice(0, 2000) })
+                setShared(error ? errText(error) : 'Đã gửi đơn vào chat.')
+              }}
+            >
+              💬 Gửi đơn vào chat
+            </Button>
+            {shared && <span className="text-sm text-slate-700">{shared}</span>}
+          </div>
+        )}
         <p className="text-sm text-slate-600">
           Người xử lý: <b>{order.assignee_id ? ctx.nameOf(order.assignee_id) : 'chưa giao'}</b> · Tạo bởi {ctx.nameOf(order.created_by)} · Cập nhật {ago(order.last_activity_at)}
         </p>

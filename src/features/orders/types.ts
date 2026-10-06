@@ -2,8 +2,16 @@ export type Order = {
   id: string
   group_id: string
   code: string
-  title: string
-  details: string
+  goods: string
+  weight_kg: number
+  packages: number
+  pickup_at: string
+  delivery_at: string
+  pickup_address: string
+  delivery_address: string
+  contact_name: string
+  contact_phone: string
+  priority: 'NORMAL' | 'URGENT'
   status: string
   assignee_id: string | null
   issue_open: boolean
@@ -27,7 +35,7 @@ export type OrderEvent = {
   created_at: string
 }
 
-export type Message = { id: number; group_id: string; order_id: string | null; sender_id: string; body: string; created_at: string }
+export type Message = { id: number; group_id: string; order_id: string | null; shared_order_id: string | null; sender_id: string; body: string; created_at: string }
 
 export type Member = { user_id: string; roles: string[]; name: string }
 

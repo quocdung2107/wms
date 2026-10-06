@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Notice, useLoad } from '../../shared/ui/ui'
 import { Board } from './Board'
+import { NewOrderForm } from './NewOrderForm'
+import { OrderDetail } from './OrderDetail'
 import { Chat } from './Chat'
 import { sb } from './api'
 import { Members } from './Members'
@@ -8,8 +10,9 @@ import type { GroupCtx, Member } from './types'
 import { Card } from '../../shared/ui/ui'
 
 const VIEWS = [
+  { id: 'chat', label: '💬 Chat' },
+  { id: 'new', label: '➕ Tạo đơn' },
   { id: 'orders', label: '📦 Đơn hàng' },
-  { id: 'chat', label: '💬 Chat chung' },
   { id: 'members', label: '👥 Thành viên' },
 ] as const
 
@@ -24,7 +27,8 @@ async function loadMembers(groupId: string): Promise<Member[]> {
 }
 
 export function GroupView({ groupId, me }: { groupId: string; me: string }) {
-  const [view, setView] = useState<(typeof VIEWS)[number]['id']>('orders')
+  const [view, setView] = useState<(typeof VIEWS)[number]['id']>('chat')
+  const [openId, setOpenId] = useState<string | null>(null)
   const members = useLoad(() => loadMembers(groupId), [groupId])
 
   if (members.error) return <Notice kind="error">Không tải được thành viên group.</Notice>
@@ -47,12 +51,15 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2" role="tablist">
-        {VIEWS.map((v) => (
+        {VIEWS.filter((v) => v.id !== 'new' || ctx.canCoordinate).map((v) => (
           <button
             key={v.id}
             role="tab"
             aria-selected={view === v.id}
-            onClick={() => setView(v.id)}
+            onClick={() => {
+              setView(v.id)
+              setOpenId(null)
+            }}
             className={`min-h-11 rounded-lg border px-4 text-base ${view === v.id ? 'border-teal-700 bg-teal-50 font-semibold' : 'border-slate-300 bg-white'}`}
           >
             {v.label}
@@ -60,12 +67,22 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
         ))}
       </div>
       {!ctx.canWork && <Notice kind="info">Bạn chưa có vai trò trong group: chỉ xem đơn và nhắn tin. Nhờ admin gán vai trò.</Notice>}
-      {view === 'orders' && <Board ctx={ctx} />}
-      {view === 'chat' && (
+      {view === 'chat' && openId && <OrderDetail key={openId} ctx={ctx} orderId={openId} onClose={() => setOpenId(null)} backLabel="← Về chat" backAlways />}
+      {view === 'chat' && !openId && (
         <Card>
-          <Chat ctx={ctx} orderId={null} />
+          <Chat ctx={ctx} orderId={null} onOpenOrder={setOpenId} />
         </Card>
       )}
+      {view === 'new' && ctx.canCoordinate && (
+        <NewOrderForm
+          ctx={ctx}
+          onCreated={(id) => {
+            setView('chat')
+            setOpenId(id)
+          }}
+        />
+      )}
+      {view === 'orders' && <Board ctx={ctx} />}
       {view === 'members' && <Members ctx={ctx} />}
     </div>
   )

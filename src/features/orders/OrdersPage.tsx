@@ -66,21 +66,21 @@ function Groups({ me }: { me: string }) {
   return (
     <div className="space-y-4">
       {list.length === 0 && <Notice>Bạn chưa thuộc group nào. Nhờ admin group thêm email của bạn, hoặc tạo group mới cho team.</Notice>}
-      <div className="flex flex-wrap items-end gap-2">
-        {current && (
-          <div className="min-w-48 flex-1">
-            <Field label="Group">
-              <select className={inputClass} value={current.id} onChange={(e) => pick(e.target.value)}>
-                {list.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        )}
-        <Button onClick={() => setCreating((c) => !c)}>{creating ? 'Đóng' : '+ Tạo group'}</Button>
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Group">
+        {list.map((g) => (
+          <button
+            key={g.id}
+            role="tab"
+            aria-selected={current?.id === g.id}
+            onClick={() => pick(g.id)}
+            className={`min-h-11 max-w-full truncate rounded-lg border px-4 text-base ${current?.id === g.id ? 'border-teal-700 bg-teal-700 font-semibold text-white' : 'border-slate-300 bg-white'}`}
+          >
+            {g.name}
+          </button>
+        ))}
+        <Button onClick={() => setCreating((c) => !c)} aria-label="Tạo group">
+          {creating ? 'Đóng' : '+'}
+        </Button>
       </div>
 
       {creating && (

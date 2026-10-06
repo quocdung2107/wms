@@ -9,3 +9,10 @@ export function ago(iso: string) {
   if (min < 1440) return `${Math.round(min / 60)} giờ trước`
   return `${Math.round(min / 1440)} ngày trước`
 }
+
+/** Giá trị `datetime-local` (giờ máy) → ISO để gửi lên server. */
+export const localToIso = (v: string) => new Date(v).toISOString()
+
+export function fmtDay(iso: string) {
+  return new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+}

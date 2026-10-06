@@ -21,6 +21,7 @@ const ERRORS: Record<string, string> = {
   use_complete_order: 'Dùng nút Hoàn thành để kết thúc đơn.',
   assignee_not_member: 'Người xử lý phải là thành viên group.',
   not_found: 'Không tìm thấy.',
+  orders_delivery_after_pickup: 'Thời gian giao phải sau thời gian nhận.',
   'check constraint': 'Nội dung trống hoặc quá dài.',
 }
 

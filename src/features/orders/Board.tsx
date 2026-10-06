@@ -1,63 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui'
-import { errText, rpc, sb } from './api'
-import { ago } from './format'
+import { Button, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui'
+import { sb } from './api'
+import { ago, fmtDay } from './format'
 import { OrderDetail } from './OrderDetail'
 import { AttentionBadge, StatusBadge, STATUSES } from './status'
 import type { GroupCtx, Order } from './types'
 import { useRealtime } from './useRealtime'
 
-function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id: string) => void }) {
-  const [code, setCode] = useState('')
-  const [title, setTitle] = useState('')
-  const [details, setDetails] = useState('')
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function create() {
-    setBusy(true)
-    setErr('')
-    try {
-      const id = (await rpc('create_order', { p_group: ctx.groupId, p_code: code, p_title: title, p_details: details })) as string
-      onCreated(id)
-    } catch (e) {
-      setErr(errText(e))
-    }
-    setBusy(false)
-  }
-
-  return (
-    <Card>
-      <form
-        className="space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void create()
-        }}
-      >
-        <h2 className="text-lg font-semibold">Tạo đơn mới</h2>
-        <Field label="Mã đơn (để trống = tự sinh DH-0001…)">
-          <input className={inputClass} maxLength={40} value={code} onChange={(e) => setCode(e.target.value)} />
-        </Field>
-        <Field label="Tiêu đề">
-          <input className={inputClass} required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </Field>
-        <Field label="Chi tiết (hàng, số lượng, điểm lấy/giao, ngày…)">
-          <textarea className={inputClass} rows={4} maxLength={4000} value={details} onChange={(e) => setDetails(e.target.value)} />
-        </Field>
-        <Button type="submit" kind="primary" disabled={busy || !title.trim()}>
-          Tạo đơn
-        </Button>
-        {err && <Notice kind="error">{err}</Notice>}
-      </form>
-    </Card>
-  )
-}
-
 /** Active Orders: đếm theo trạng thái, Cần chú ý lên đầu, lọc theo người xử lý; Lịch sử = đơn đã hoàn thành. */
 export function Board({ ctx }: { ctx: GroupCtx }) {
   const [openId, setOpenId] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
   const [assignee, setAssignee] = useState('all')
   const [status, setStatus] = useState('all')
   const [history, setHistory] = useState(false)
@@ -108,23 +60,7 @@ export function Board({ ctx }: { ctx: GroupCtx }) {
           <Button kind={history ? 'primary' : 'secondary'} onClick={() => setHistory(true)}>
             Lịch sử ({all.length - active.length})
           </Button>
-          {ctx.canCoordinate && (
-            <Button onClick={() => setCreating((c) => !c)} className="ml-auto">
-              {creating ? 'Đóng' : '+ Tạo đơn'}
-            </Button>
-          )}
         </div>
-
-        {creating && (
-          <NewOrderForm
-            ctx={ctx}
-            onCreated={(id) => {
-              setCreating(false)
-              setOpenId(id)
-              orders.reload()
-            }}
-          />
-        )}
 
         {!history && (
           <div className="flex flex-wrap gap-2">
@@ -158,9 +94,13 @@ export function Board({ ctx }: { ctx: GroupCtx }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-sm text-slate-600">{o.code}</span>
                   <StatusBadge code={o.status} />
+                  {o.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
                   <AttentionBadge reason={o.attention_reason} />
                 </div>
-                <div className="font-semibold">{o.title}</div>
+                <div className="font-semibold">{o.goods}</div>
+                <div className="text-sm text-slate-700">
+                  {o.weight_kg} kg · {o.packages} kiện · giao {fmtDay(o.delivery_at)}
+                </div>
                 <div className="text-sm text-slate-600">
                   {o.assignee_id ? ctx.nameOf(o.assignee_id) : 'Chưa giao'} · cập nhật {ago(o.last_activity_at)}
                 </div>
