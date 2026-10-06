@@ -1,32 +1,35 @@
-# React + TypeScript + Vite
+# Warehouse Assistant (app)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Lệnh dev (chạy trong `app/`): `npm run dev`, `npm run build`, `npm run test`, `npm run lint`, `npm run preview`.
 
-Currently, two official plugins are available:
+## Triển khai lên GitHub Pages
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Địa chỉ app: `https://quocdung2107.github.io/wms/`
 
-## React Compiler
+Các bước làm một lần trên GitHub (repo `wms`):
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Mở **Settings > Pages**. Ở mục **Build and deployment > Source**, chọn **GitHub Actions**.
+2. Mở **Settings > Secrets and variables > Actions**, chuyển sang tab **Variables**, bấm **New repository variable** và thêm 2 biến:
+   - `VITE_SUPABASE_URL` = `https://<project-ref>.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY` = anon key (public) của project Supabase
+   (Lấy ở Supabase: Project Settings > API. Không dùng service_role key.)
+3. Mở tab **Actions**, chạy lại workflow deploy (hoặc push lên `main`). Chờ workflow xanh.
+4. Mở `https://quocdung2107.github.io/wms/` kiểm tra app tải được.
 
-## Expanding the Oxlint configuration
+## Cấu hình Supabase Auth (cho đăng nhập OTP của Order Chat)
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+Vào Supabase Dashboard > **Authentication > URL Configuration**:
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
+1. **Site URL** = `https://quocdung2107.github.io/wms/`
+2. **Redirect URLs** > Add URL = `https://quocdung2107.github.io/wms/`
+3. Bấm Save. Thử đăng nhập OTP trên địa chỉ Pages, đảm bảo quay về đúng địa chỉ này.
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+(Khi dev cục bộ, có thể thêm thêm `http://localhost:5173/` vào Redirect URLs.)
+
+## Cài vào màn hình chính (PWA)
+
+- **iPhone (Safari)**: mở địa chỉ app > nút Chia sẻ > **Thêm vào Màn hình chính** > Thêm.
+- **Android (Chrome)**: mở địa chỉ app > menu ba chấm > **Cài đặt ứng dụng** / **Thêm vào màn hình chính**.
+- **Máy tính (Chrome/Edge)**: bấm biểu tượng cài đặt ở cuối thanh địa chỉ.
+
+Lần đầu cần có mạng để tải app; sau đó công cụ kho chạy offline.
