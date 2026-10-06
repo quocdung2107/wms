@@ -49,8 +49,8 @@ export default function PickForm({ target, onClose, onSaved }: { target: LocTarg
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Lấy hàng">
-      <div className="max-h-full w-full max-w-md space-y-3 overflow-y-auto rounded-t-2xl bg-white p-4 md:rounded-2xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Lấy hàng">
+      <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto overscroll-contain rounded-b-2xl bg-white p-4 md:max-h-[90dvh] md:rounded-2xl">
         <h2 className="text-xl font-bold">Lấy hàng · {target.sku}</h2>
         <p className="text-slate-700">
           {target.location || '—'}{target.batch_no ? ` · ${target.batch_no}` : ''} · tồn ước tính <b>{fmtQty(est)}</b> {target.uom}
