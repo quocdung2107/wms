@@ -3,7 +3,12 @@ import { NoDataNotice } from '../../shared/inventory/hooks.tsx'
 import { getRowsBySku, getUomMap, listSources, searchSkus, type SkuHit, type SkuRow } from '../../shared/inventory/repo.ts'
 import { flagOf, FLAG_TEXT, fmtDate, fmtQty } from '../../shared/inventory/sheet.ts'
 import { makeUomLabeler } from '../../shared/inventory/uom.ts'
-import { Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
+import { estimateStock, getPickedBySku, locKey } from '../../shared/inventory/history.ts'
+import { Button, Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
+
+import CountDrawer from './CountDrawer.tsx'
+import HistoryPage from './HistoryPage.tsx'
+import PickForm, { type LocTarget } from './PickForm.tsx'
 
 export default function SkuLookupPage() {
   const sources = useLoad(listSources, [])
@@ -13,6 +18,9 @@ export default function SkuLookupPage() {
   const [hits, setHits] = useState<SkuHit[]>([])
   const [sku, setSku] = useState('')
   const [rows, setRows] = useState<SkuRow[] | null>(null)
+  const [picked, setPicked] = useState<Map<string, number>>(new Map())
+  const [showHistory, setShowHistory] = useState(false)
+  const [panel, setPanel] = useState<{ kind: 'count' | 'pick'; target: LocTarget } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -27,8 +35,11 @@ export default function SkuLookupPage() {
     setSku(code)
     setTerm(code)
     setHits([])
+    setPicked(await getPickedBySku(code).catch(() => new Map()))
     setRows(await getRowsBySku(code))
   }
+
+  if (showHistory) return <HistoryPage onBack={() => { setShowHistory(false); if (sku) show(sku) }} />
 
   if (!sources.loading && (sources.data?.length ?? 0) === 0) return <NoDataNotice />
 
@@ -38,6 +49,7 @@ export default function SkuLookupPage() {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
+        <Button onClick={() => setShowHistory(true)}>Lịch sử</Button>
         <input
           className={`${inputClass} text-lg`}
           value={term}
@@ -84,6 +96,11 @@ export default function SkuLookupPage() {
                 {rows.map((r) => {
                   const f = flagOf(r.qty_system)
                   const bad = r.condition && r.condition.toUpperCase() !== 'GOOD'
+                  const pk = picked.get(locKey(r.source, r.location, r.batch_no)) ?? 0
+                  const target: LocTarget = {
+                    sku, description: rows[0].description ?? '', source: r.source ?? '', location: r.location ?? '',
+                    batch_no: r.batch_no ?? '', uom: uomOf(r.uom_raw), qtySystem: r.qty_system, picked: pk,
+                  }
                   return (
                     <Card key={r.id} className="space-y-1">
                       <div className="flex items-start justify-between gap-2">
@@ -112,6 +129,13 @@ export default function SkuLookupPage() {
                           ) : null,
                         )}
                       </dl>
+                      <p className="text-base">
+                        Đã lấy: <b>{fmtQty(pk)}</b> · Tồn ước tính: <b>{fmtQty(estimateStock(r.qty_system, pk))}</b>
+                      </p>
+                      <div className="flex gap-2 pt-1">
+                        <Button className="flex-1" onClick={() => setPanel({ kind: 'count', target })}>Kiểm</Button>
+                        <Button className="flex-1" onClick={() => setPanel({ kind: 'pick', target })}>Lấy hàng</Button>
+                      </div>
                     </Card>
                   )
                 })}
@@ -119,6 +143,10 @@ export default function SkuLookupPage() {
             </>
           )}
         </div>
+      )}
+      {panel?.kind === 'count' && <CountDrawer target={panel.target} onClose={() => setPanel(null)} onSaved={() => {}} />}
+      {panel?.kind === 'pick' && (
+        <PickForm target={panel.target} onClose={() => setPanel(null)} onSaved={() => getPickedBySku(sku).then(setPicked, () => {})} />
       )}
     </div>
   )

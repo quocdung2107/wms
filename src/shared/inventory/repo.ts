@@ -38,6 +38,15 @@ export function initSchema() {
       { sql: 'CREATE INDEX IF NOT EXISTS idx_inv_source ON inventory_rows(source_id)' },
       { sql: 'CREATE INDEX IF NOT EXISTS idx_inv_sku ON inventory_rows(sku)' },
       { sql: 'CREATE TABLE IF NOT EXISTS uom_map (key TEXT PRIMARY KEY, label TEXT NOT NULL)' },
+      // Lịch sử kiểm/lấy hàng: lưu sao chụp (không khoá ngoại), sống sót khi nạp lại file.
+      { sql: 'CREATE TABLE IF NOT EXISTS count_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, description TEXT, source TEXT, location TEXT, batch_no TEXT, uom TEXT, qty_system REAL, qty_counted REAL, diff REAL, counted_at TEXT, note TEXT)' },
+      { sql: 'CREATE TABLE IF NOT EXISTS count_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, seq INTEGER, expr TEXT, value REAL)' },
+      { sql: 'CREATE TABLE IF NOT EXISTS picks (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, description TEXT, source TEXT, location TEXT, batch_no TEXT, uom TEXT, qty REAL, order_no TEXT, picked_at TEXT, note TEXT)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_count_sku ON count_sessions(sku)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_count_at ON count_sessions(counted_at)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_count_lines_session ON count_lines(session_id)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_picks_sku ON picks(sku)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_picks_at ON picks(picked_at)' },
     ])
     const [{ n }] = await query('SELECT COUNT(*) AS n FROM uom_map')
     if (n === 0) await batch(Object.entries(DEFAULT_UOM).map(([k, v]) => ({ sql: 'INSERT INTO uom_map VALUES (?, ?)', bind: [k, v] })))
