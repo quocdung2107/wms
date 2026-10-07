@@ -3,7 +3,7 @@ import { supabase } from '../../shared/supabase/client'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui'
 import { DevLogin } from './DevLogin' // TẠM: xoá cùng DevLogin.tsx
 
-/** Đăng nhập bằng mã OTP 6 số gửi qua email (SMS làm sau). */
+/** Đăng nhập bằng mã OTP (6–8 số) gửi qua email (SMS làm sau). */
 export function LoginForm() {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -27,7 +27,7 @@ export function LoginForm() {
     setError('')
     const { error: e } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: 'email' })
     setBusy(false)
-    if (e) setError('Mã sai hoặc đã hết hạn.')
+    if (e) setError(e.status === 429 ? 'Thử quá nhiều lần, chờ ít phút.' : 'Mã sai hoặc đã hết hạn. Dùng mã trong email mới nhất.')
   }
 
   return (
@@ -58,7 +58,7 @@ export function LoginForm() {
           }}
         >
           <Notice>Đã gửi mã tới {email}. Mã có hiệu lực ngắn.</Notice>
-          <Field label="Mã 6 số">
+          <Field label="Mã trong email">
             <input
               required
               autoComplete="one-time-code"
