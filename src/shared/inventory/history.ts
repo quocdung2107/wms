@@ -34,11 +34,15 @@ export interface Pick {
   order_no: string | null
   picked_at: string
   note: string
+  /** Đơn picking (PK-xxxx) mà lần lấy này thuộc về; null/thiếu = lần lấy lẻ từ Tra SKU. */
+  pick_order_id?: number | null
 }
 
 export type PickInput = Omit<Pick, 'id'>
 
-export interface HistoryFilter { sku?: string; from?: string; to?: string } // from/to: YYYY-MM-DD
+export type PickEdit = { qty: number; location: string; batch_no: string; note: string; picked_at: string }
+
+export interface HistoryFilter { sku?: string; from?: string; to?: string; pickOrderId?: number } // from/to: YYYY-MM-DD
 
 // ---------- hàm thuần ----------
 
@@ -120,6 +124,7 @@ function where(col: string, f: HistoryFilter): { sql: string; bind: string[] } {
   const bind: string[] = []
   const { from, to } = dateBounds(f)
   if (f.sku?.trim()) { parts.push('sku LIKE ?'); bind.push(`%${f.sku.trim()}%`) }
+  if (f.pickOrderId !== undefined) { parts.push('pick_order_id = ?'); bind.push(String(f.pickOrderId)) }
   if (from) { parts.push(`${col} >= ?`); bind.push(from) }
   if (to) { parts.push(`${col} <= ?`); bind.push(to) }
   return { sql: parts.length ? 'WHERE ' + parts.join(' AND ') : '', bind }
@@ -150,9 +155,9 @@ export async function savePick(p: PickInput): Promise<number> {
   if (!(p.qty > 0)) throw new Error('Số lượng phải lớn hơn 0')
   const { query } = await db()
   await query(
-    `INSERT INTO picks (sku, description, source, location, batch_no, uom, qty, order_no, picked_at, note)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no?.trim() || null, p.picked_at || nowLocal(), p.note],
+    `INSERT INTO picks (sku, description, source, location, batch_no, uom, qty, order_no, picked_at, note, pick_order_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no?.trim() || null, p.picked_at || nowLocal(), p.note, p.pick_order_id ?? null],
   )
   const [{ id }] = await query('SELECT last_insert_rowid() AS id')
   return id as number
@@ -191,7 +196,18 @@ export async function listPicks(f: HistoryFilter = {}): Promise<Pick[]> {
     id: r.id as number, sku: str(r.sku), description: str(r.description), source: str(r.source),
     location: str(r.location), batch_no: str(r.batch_no), uom: str(r.uom), qty: (r.qty as number) ?? 0,
     order_no: r.order_no == null ? null : String(r.order_no), picked_at: str(r.picked_at), note: str(r.note),
+    pick_order_id: r.pick_order_id == null ? null : (r.pick_order_id as number),
   }))
+}
+
+/** Sửa một lần lấy (số lượng, vị trí, lô, ghi chú, giờ). */
+export async function updatePick(id: number, p: PickEdit): Promise<void> {
+  if (!(p.qty > 0)) throw new Error('Số lượng phải lớn hơn 0')
+  const { query } = await db()
+  await query(
+    'UPDATE picks SET qty = ?, location = ?, batch_no = ?, note = ?, picked_at = ? WHERE id = ?',
+    [p.qty, p.location, p.batch_no, p.note, p.picked_at, id],
+  )
 }
 
 /** Xoá một lần kiểm cùng các dòng phép tính của nó. */

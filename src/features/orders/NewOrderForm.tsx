@@ -5,7 +5,7 @@ import { localToIso } from './format'
 import type { GroupCtx } from './types'
 
 export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id: string) => void }) {
-  const [f, setF] = useState({ code: '', goods: '', weight: '', packages: '', pickupAt: '', deliveryAt: '', pickupAddr: '', deliveryAddr: '', contact: '', phone: '', urgent: false })
+  const [f, setF] = useState({ code: '', goods: '', weight: '', packages: '', pickupAt: '', deliveryAt: '', pickupAddr: '', deliveryAddr: '', contact: '', phone: '', customer: '', customerAddr: '', urgent: false })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }))
@@ -33,6 +33,8 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
         p_contact_name: f.contact,
         p_contact_phone: f.phone,
         p_priority: f.urgent ? 'URGENT' : 'NORMAL',
+        p_customer_name: f.customer,
+        p_customer_address: f.customerAddr,
       })) as string
       onCreated(id)
     } catch (e) {
@@ -67,6 +69,12 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
           </Field>
           <Field label="Thời gian giao hàng *">
             <input className={inputClass} required type="datetime-local" min={f.pickupAt} value={f.deliveryAt} onChange={set('deliveryAt')} />
+          </Field>
+          <Field label="Người đặt hàng">
+            <input className={inputClass} maxLength={100} value={f.customer} onChange={set('customer')} />
+          </Field>
+          <Field label="Địa chỉ đặt hàng">
+            <input className={inputClass} maxLength={300} value={f.customerAddr} onChange={set('customerAddr')} />
           </Field>
           <Field label="Điểm nhận">
             <input className={inputClass} maxLength={300} value={f.pickupAddr} onChange={set('pickupAddr')} />

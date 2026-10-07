@@ -11,6 +11,9 @@ export type Order = {
   delivery_address: string
   contact_name: string
   contact_phone: string
+  customer_name: string
+  customer_address: string
+  shipment_code: string | null
   priority: 'NORMAL' | 'URGENT'
   status: string
   assignee_id: string | null
@@ -35,7 +38,18 @@ export type OrderEvent = {
   created_at: string
 }
 
-export type Message = { id: number; group_id: string; order_id: string | null; shared_order_id: string | null; sender_id: string; body: string; created_at: string }
+export type Attachment = { id: number; message_id: number; group_id: string; path: string; width: number | null; height: number | null; position: number }
+
+export type Message = {
+  id: number
+  group_id: string
+  order_id: string | null
+  shared_order_id: string | null
+  sender_id: string
+  body: string
+  created_at: string
+  attachments?: Attachment[]
+}
 
 export type Member = { user_id: string; roles: string[]; name: string }
 

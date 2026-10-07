@@ -2,6 +2,7 @@ import { batch, dbReady, query } from '../db/client.ts'
 import { STD_FIELDS, type StdField, type StdRow } from '../excel/reader.ts'
 import type { InvRow } from './sheet.ts'
 import { DEFAULT_UOM } from './uom.ts'
+import { picksUpgradeSql } from '../../features/pick-orders/logic.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
 
@@ -47,7 +48,16 @@ export function initSchema() {
       { sql: 'CREATE INDEX IF NOT EXISTS idx_count_lines_session ON count_lines(session_id)' },
       { sql: 'CREATE INDEX IF NOT EXISTS idx_picks_sku ON picks(sku)' },
       { sql: 'CREATE INDEX IF NOT EXISTS idx_picks_at ON picks(picked_at)' },
+      // Đơn picking cục bộ (PK-xxxx). Bộ đếm riêng: mã không bị tái dùng sau khi xoá đơn.
+      { sql: `CREATE TABLE IF NOT EXISTS pick_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL, name TEXT, status TEXT NOT NULL DEFAULT 'open', order_ref TEXT, created_at TEXT)` },
+      { sql: 'CREATE TABLE IF NOT EXISTS pick_order_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, pick_order_id INTEGER NOT NULL, sku TEXT NOT NULL, description TEXT, uom TEXT, qty_need REAL NOT NULL)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_pol_order ON pick_order_lines(pick_order_id)' },
+      { sql: 'CREATE TABLE IF NOT EXISTS pick_counter (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL)' },
+      { sql: 'INSERT OR IGNORE INTO pick_counter (id, n) VALUES (1, 0)' },
     ])
+    // DB cũ: picks chưa có cột pick_order_id -> thêm (không mất dữ liệu cũ).
+    const cols = (await query('PRAGMA table_info(picks)')).map((c) => String(c.name))
+    await batch(picksUpgradeSql(cols).map((sql) => ({ sql })))
     const [{ n }] = await query('SELECT COUNT(*) AS n FROM uom_map')
     if (n === 0) await batch(Object.entries(DEFAULT_UOM).map(([k, v]) => ({ sql: 'INSERT INTO uom_map VALUES (?, ?)', bind: [k, v] })))
   })()

@@ -16,6 +16,7 @@ const TOOLS: { path: string; title: string; hint: string; icon: string; page: Co
   { path: 'data', title: 'Nạp dữ liệu', hint: 'Nạp file Excel/CSV từ WMS, MISA; quản lý nguồn', icon: '📥', page: lazy(() => import('../features/data/DataPage.tsx')) },
   { path: 'kiem-kho', title: 'Kiểm kho', hint: 'Phiếu kiểm A4 theo dãy kệ, xem trên điện thoại', icon: '📋', page: lazy(() => import('../features/inventory-check/InventoryCheckPage.tsx')) },
   { path: 'tra-sku', title: 'Tra SKU', hint: 'Gõ SKU, xem mọi vị trí, lô, ngày, tình trạng', icon: '🔎', page: lazy(() => import('../features/sku-lookup/SkuLookupPage.tsx')) },
+  { path: 'don-picking', title: 'Đơn picking', hint: 'Tạo đơn PK, lấy hàng theo đơn, theo dõi tiến độ', icon: '🧾', page: lazy(() => import('../features/pick-orders/PickOrdersPage.tsx')) },
   { path: 'barcode', title: 'Barcode / QR', hint: 'Mã Code128 và QR, in hàng loạt', icon: '▥', page: lazy(() => import('../features/barcode/BarcodePage.tsx')) },
   { path: 'label', title: 'Label Maker', hint: 'Giấy đánh dấu pallet, vị trí, lô trên A4', icon: '🏷️', page: lazy(() => import('../features/label-maker/LabelMakerPage.tsx')) },
   { path: 'excel', title: 'Excel Formatter', hint: 'Lọc, sắp xếp, đổi tên, nhóm, tách, gộp cột', icon: '📊', page: lazy(() => import('../features/excel-formatter/ExcelFormatterPage.tsx')) },

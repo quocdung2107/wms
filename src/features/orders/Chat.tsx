@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, inputClass, Notice, useLoad } from '../../shared/ui/ui'
-import { errText, sb } from './api'
+import { AlbumGrid } from './AlbumGrid'
+import { errText, sb, sendMessageWithImages, uploadChatImages } from './api'
 import { fmtDay, fmtTime } from './format'
+import { compressImage, MAX_IMAGES, takeImages } from './imageUtils'
 import { AttentionBadge, StatusBadge } from './status'
-import type { GroupCtx, Message, Order } from './types'
+import type { Attachment, GroupCtx, Message, Order } from './types'
 import { useRealtime } from './useRealtime'
 
 function OrderCard({ order, loading, onOpen }: { order: Order | undefined; loading: boolean; onOpen?: (id: string) => void }) {
@@ -30,20 +32,39 @@ function OrderCard({ order, loading, onOpen }: { order: Order | undefined; loadi
   )
 }
 
+/** Gắn ảnh đính kèm vào các message (message chữ không có ảnh thì để trống). */
+async function withAttachments(msgs: Message[]): Promise<Message[]> {
+  if (msgs.length === 0) return msgs
+  const { data, error } = await sb()
+    .from('message_attachments')
+    .select('*')
+    .in('message_id', msgs.map((m) => m.id))
+    .order('position')
+  if (error) throw error
+  const by = new Map<number, Attachment[]>()
+  for (const a of data as Attachment[]) by.set(a.message_id, [...(by.get(a.message_id) ?? []), a])
+  return msgs.map((m) => (by.has(m.id) ? { ...m, attachments: by.get(m.id) } : m))
+}
+
+type Picked = { file: File; url: string }
+
 /** Chat chung của group (orderId = null) hoặc chat riêng trong một đơn. */
 export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: string | null; onOpenOrder?: (id: string) => void }) {
   const [extra, setExtra] = useState<Message[]>([])
   const [body, setBody] = useState('')
   const [err, setErr] = useState('')
   const [ordersTick, setOrdersTick] = useState(0)
+  const [picked, setPicked] = useState<Picked[]>([])
+  const [busy, setBusy] = useState(false)
   const end = useRef<HTMLDivElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const initial = useLoad(async () => {
     let q = sb().from('messages').select('*').eq('group_id', ctx.groupId)
     q = orderId ? q.eq('order_id', orderId) : q.is('order_id', null)
     const { data, error } = await q.order('id', { ascending: false }).limit(100)
     if (error) throw error
-    return (data as Message[]).reverse()
+    return withAttachments((data as Message[]).reverse())
   }, [ctx.groupId, orderId])
 
   useRealtime(ctx.groupId, ['messages', 'orders'], (t, p) => {
@@ -54,7 +75,10 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
     if (p.eventType !== 'INSERT') return
     const m = p.new as Message
     if ((m.order_id ?? null) !== orderId) return
-    setExtra((x) => (x.some((y) => y.id === m.id) ? x : [...x, m]))
+    // Message tới trước ảnh: tải attachments rồi mới hiện (RPC cùng giao dịch nên ảnh đã có).
+    void withAttachments([m])
+      .catch(() => [m])
+      .then(([mm]) => setExtra((x) => (x.some((y) => y.id === mm.id) ? x : [...x, mm])))
   })
 
   const all = [...(initial.data ?? [])]
@@ -73,8 +97,43 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
     end.current?.scrollIntoView({ block: 'end' })
   }, [all.length])
 
+  function pick(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const imgs = [...files].filter((f) => f.type.startsWith('image/'))
+    const { list, dropped } = takeImages(picked.map((p) => p.file), imgs)
+    const next = list.map((file, i) => (i < picked.length ? picked[i] : { file, url: URL.createObjectURL(file) }))
+    setPicked(next)
+    setErr(dropped > 0 ? `Mỗi lần gửi tối đa ${MAX_IMAGES} ảnh, đã bỏ ${dropped} ảnh thừa.` : '')
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
+  function unpick(i: number) {
+    URL.revokeObjectURL(picked[i].url)
+    setPicked(picked.filter((_, k) => k !== i))
+  }
+
   async function send() {
     const text = body.trim()
+    if (busy) return
+    if (picked.length > 0) {
+      setErr('')
+      setBusy(true)
+      try {
+        const done = []
+        for (const p of picked) done.push(await compressImage(p.file))
+        const up = await uploadChatImages(ctx.groupId, done)
+        await sendMessageWithImages(ctx.groupId, orderId, text, up)
+        for (const p of picked) URL.revokeObjectURL(p.url)
+        setPicked([])
+        setBody('')
+      } catch (e) {
+        // Chưa tạo message nào; ảnh đã tải (nếu có) bỏ lại trong Storage.
+        setErr(`Gửi ảnh thất bại, chưa gửi gì. ${errText(e)}`)
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (!text) return
     setErr('')
     const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, order_id: orderId, sender_id: ctx.me, body: text })
@@ -95,12 +154,34 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
             {m.shared_order_id ? (
               <OrderCard order={cards.data?.get(m.shared_order_id)} loading={cards.loading} onOpen={onOpenOrder} />
             ) : (
-              <div className={`inline-block max-w-full whitespace-pre-wrap break-words rounded-lg px-3 py-1.5 text-left ${m.sender_id === ctx.me ? 'bg-teal-100' : 'bg-white'}`}>{m.body}</div>
+              <>
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className={m.sender_id === ctx.me ? 'flex flex-col items-end gap-1' : 'flex flex-col items-start gap-1'}>
+                    <AlbumGrid attachments={m.attachments} />
+                  </div>
+                )}
+                {m.body && <div className={`inline-block max-w-full whitespace-pre-wrap break-words rounded-lg px-3 py-1.5 text-left ${m.sender_id === ctx.me ? 'bg-teal-100' : 'bg-white'}`}>{m.body}</div>}
+              </>
             )}
           </div>
         ))}
         <div ref={end} />
       </div>
+      {picked.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {picked.map((p, i) => (
+            <div key={p.url} className="relative h-16 w-16 overflow-hidden rounded-md bg-slate-200">
+              <img src={p.url} alt="" className="h-full w-full object-cover" />
+              <button type="button" aria-label="Bỏ ảnh này" disabled={busy} onClick={() => unpick(i)} className="absolute right-0 top-0 h-6 w-6 rounded-bl-md bg-black/60 text-white">
+                ×
+              </button>
+            </div>
+          ))}
+          <span className="self-center text-sm text-slate-600">
+            {picked.length}/{MAX_IMAGES} ảnh{busy ? ' · đang nén và tải lên…' : ''}
+          </span>
+        </div>
+      )}
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -108,9 +189,13 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
           void send()
         }}
       >
-        <input className={inputClass} maxLength={2000} placeholder="Nhập tin nhắn…" value={body} onChange={(e) => setBody(e.target.value)} />
-        <Button type="submit" kind="primary" disabled={!body.trim()}>
-          Gửi
+        <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => pick(e.target.files)} />
+        <Button aria-label="Đính kèm ảnh" disabled={busy} onClick={() => fileInput.current?.click()}>
+          📎
+        </Button>
+        <input className={inputClass} maxLength={2000} placeholder={picked.length ? 'Chú thích (tuỳ chọn)…' : 'Nhập tin nhắn…'} value={body} onChange={(e) => setBody(e.target.value)} />
+        <Button type="submit" kind="primary" disabled={busy || (!body.trim() && picked.length === 0)}>
+          {busy ? 'Đang gửi…' : 'Gửi'}
         </Button>
       </form>
       {err && <Notice kind="error">{err}</Notice>}

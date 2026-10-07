@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { PickOrder } from '../pick-orders/api'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui'
 import { Chat } from './Chat'
 import { errText, rpc, sb } from './api'
@@ -49,6 +50,11 @@ export function OrderDetail({ ctx, orderId, onClose, backLabel = '← Danh sách
   const [assignee, setAssignee] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [shared, setShared] = useState('')
+  const [cust, setCust] = useState<{ name: string; addr: string } | null>(null)
+  const [ship, setShip] = useState<string | null>(null)
+  const [msg, setMsg] = useState('')
+  const [pk, setPk] = useState<{ list: PickOrder[]; sel: number } | null>(null)
+  const [pkMsg, setPkMsg] = useState('')
 
   if (data.error) return <Notice kind="error">Không tải được đơn.</Notice>
   if (!data.data) return <p className="text-slate-600">Đang tải…</p>
@@ -91,6 +97,17 @@ export function OrderDetail({ ctx, orderId, onClose, backLabel = '← Danh sách
             Giao hàng: <b>{fmtDay(order.delivery_at)}</b>
             {order.delivery_address && ` · ${order.delivery_address}`}
           </div>
+          {order.customer_name && (
+            <div>
+              Người đặt hàng: <b>{order.customer_name}</b>
+            </div>
+          )}
+          {order.customer_address && <div>Địa chỉ đặt hàng: {order.customer_address}</div>}
+          {order.shipment_code && (
+            <div>
+              Mã vận chuyển: <b className="font-mono">{order.shipment_code}</b>
+            </div>
+          )}
           {(order.contact_name || order.contact_phone) && (
             <div>
               Liên hệ: <b>{order.contact_name}</b>{' '}
@@ -113,6 +130,37 @@ export function OrderDetail({ ctx, orderId, onClose, backLabel = '← Danh sách
               💬 Gửi đơn vào chat
             </Button>
             {shared && <span className="text-sm text-slate-700">{shared}</span>}
+            <Button
+              onClick={async () => {
+                setPkMsg('')
+                try {
+                  const [api, sum] = await Promise.all([import('../pick-orders/api'), import('../pick-orders/summary')])
+                  const list = sum.matchPickOrders(await api.listPickOrders(), order.code)
+                  if (list.length === 0) return setPkMsg(`Máy này chưa có đơn picking nào gắn mã ${order.code}.`)
+                  if (list.length > 1 && !pk) return setPk({ list, sel: list[0].id })
+                  const chosen = list.find((p) => p.id === pk?.sel) ?? list[0]
+                  const [lines, picks] = await Promise.all([api.listLines(chosen.id), api.listOrderPicks(chosen.id)])
+                  const body = sum.buildPickSummary({ pickCode: chosen.code, orderCode: order.code, customerName: order.customer_name, customerAddress: order.customer_address, shipmentCode: order.shipment_code, lines, picks })
+                  const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, order_id: orderId, sender_id: ctx.me, body })
+                  setPk(null)
+                  setPkMsg(error ? errText(error) : `Đã gửi tổng hợp ${chosen.code} vào chat đơn.`)
+                } catch {
+                  setPkMsg('Không đọc được dữ liệu picking trên máy này.')
+                }
+              }}
+            >
+              📋 Gửi tổng hợp picking
+            </Button>
+            {pk && (
+              <select className={inputClass} value={pk.sel} onChange={(e) => setPk({ ...pk, sel: Number(e.target.value) })}>
+                {pk.list.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {pkMsg && <span className="text-sm text-slate-700">{pkMsg}</span>}
           </div>
         )}
         <p className="text-sm text-slate-600">
@@ -122,6 +170,60 @@ export function OrderDetail({ ctx, orderId, onClose, backLabel = '← Danh sách
 
       {!done && ctx.canWork && (
         <Card className="space-y-5">
+          {ctx.canCoordinate && (
+            <form
+              className="space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                setMsg('')
+                act('update_order_customer', { p_customer_name: cust?.name ?? order.customer_name, p_customer_address: cust?.addr ?? order.customer_address })
+                  .then(() => setMsg('Đã lưu.'))
+                  .catch((er) => setMsg(errText(er)))
+              }}
+            >
+              <Field label="Người đặt hàng">
+                <input className={inputClass} maxLength={100} value={cust?.name ?? order.customer_name} onChange={(e) => setCust({ name: e.target.value, addr: cust?.addr ?? order.customer_address })} />
+              </Field>
+              <Field label="Địa chỉ đặt hàng">
+                <input className={inputClass} maxLength={300} value={cust?.addr ?? order.customer_address} onChange={(e) => setCust({ name: cust?.name ?? order.customer_name, addr: e.target.value })} />
+              </Field>
+              <Button type="submit">Lưu người đặt hàng</Button>
+            </form>
+          )}
+          <div className="space-y-3">
+            <Field label="Mã vận chuyển (gõ đè mã thật của hãng)">
+              <input className={inputClass} maxLength={40} value={ship ?? order.shipment_code ?? ''} onChange={(e) => setShip(e.target.value)} />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              {!order.shipment_code && (
+                <Button
+                  onClick={() => {
+                    setMsg('')
+                    act('set_shipment_code', { p_code: null })
+                      .then(() => setShip(null))
+                      .catch((er) => setMsg(errText(er)))
+                  }}
+                >
+                  Tạo mã vận chuyển
+                </Button>
+              )}
+              <Button
+                disabled={!(ship ?? '').trim()}
+                onClick={() => {
+                  setMsg('')
+                  act('set_shipment_code', { p_code: ship })
+                    .then(() => {
+                      setShip(null)
+                      setMsg('Đã lưu mã vận chuyển.')
+                    })
+                    .catch((er) => setMsg(errText(er)))
+                }}
+              >
+                Lưu mã
+              </Button>
+            </div>
+          </div>
+          {msg && <p className="text-sm text-slate-700">{msg}</p>}
           <NoteAction label="Ghi chú (bắt buộc khi lùi trạng thái)" button="Cập nhật trạng thái" kind="primary" onSubmit={(note) => act('change_status', { p_status: chosenStatus, p_note: note || null })}>
             <Field label="Trạng thái mới">
               <select className={inputClass} value={chosenStatus} onChange={(e) => setStatus(e.target.value)}>
