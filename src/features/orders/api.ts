@@ -1,4 +1,5 @@
 import { supabase } from '../../shared/supabase/client'
+import { statusOf } from './status'
 
 /** Chỉ gọi sau khi đã đăng nhập (OrdersPage đã chặn trường hợp chưa cấu hình). */
 export const sb = () => supabase!
@@ -68,4 +69,24 @@ export async function rpc(name: string, args: Record<string, unknown>) {
   const { data, error } = await sb().rpc(name, args)
   if (error) throw error
   return data
+}
+
+/** Tiền tố đánh dấu dòng đổi trạng thái (message shared_order_id, không phải thẻ đầy đủ). */
+export const STATUS_LINE_PREFIX = '↻ '
+
+/** Thêm thẻ đơn vào chat chung của group. Ném lỗi nếu không gửi được (RLS: cần vai trò gửi thẻ). */
+export async function pushOrderCard(ctx: { groupId: string; me: string }, order: { id: string; code: string; goods: string }) {
+  const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, sender_id: ctx.me, shared_order_id: order.id, body: `${order.code} — ${order.goods}`.slice(0, 2000) })
+  if (error) throw error
+}
+
+/** Thêm một dòng ngắn "CODE: A → B" vào chat chung. Chỉ gửi khi canWork; lỗi bị nuốt (đổi trạng thái đã thành công). */
+export async function pushStatusLine(ctx: { groupId: string; me: string; canWork: boolean }, order: { id: string; code: string }, from: string, to: string) {
+  if (!ctx.canWork) return
+  try {
+    const body = `${STATUS_LINE_PREFIX}${order.code}: ${statusOf(from).label} → ${statusOf(to).label}`.slice(0, 2000)
+    await sb().from('messages').insert({ group_id: ctx.groupId, sender_id: ctx.me, shared_order_id: order.id, body })
+  } catch {
+    /* bỏ qua */
+  }
 }

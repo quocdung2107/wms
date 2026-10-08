@@ -38,7 +38,7 @@ export type OrderEvent = {
   created_at: string
 }
 
-export type Attachment = { id: number; message_id: number; group_id: string; path: string; width: number | null; height: number | null; position: number }
+export type Attachment = { id: number; message_id: number; group_id: string; path: string; width: number | null; height: number | null; position: number; expires_at?: string | null; expired?: boolean }
 
 export type Message = {
   id: number

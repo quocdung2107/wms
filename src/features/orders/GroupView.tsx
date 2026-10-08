@@ -4,6 +4,8 @@ import { Board } from './Board'
 import { NewOrderForm } from './NewOrderForm'
 import { OrderDetail } from './OrderDetail'
 import { Chat } from './Chat'
+import { CompactPanel } from './CompactPanel'
+import { TrackedOrders } from './TrackedOrders'
 import { sb } from './api'
 import { Members } from './Members'
 import type { GroupCtx, Member } from './types'
@@ -29,6 +31,7 @@ async function loadMembers(groupId: string): Promise<Member[]> {
 export function GroupView({ groupId, me }: { groupId: string; me: string }) {
   const [view, setView] = useState<(typeof VIEWS)[number]['id']>('chat')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [panelId, setPanelId] = useState<string | null>(null)
   const members = useLoad(() => loadMembers(groupId), [groupId])
 
   if (members.error) return <Notice kind="error">Không tải được thành viên group.</Notice>
@@ -59,6 +62,7 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
             onClick={() => {
               setView(v.id)
               setOpenId(null)
+              setPanelId(null)
             }}
             className={`min-h-11 rounded-lg border px-4 text-base ${view === v.id ? 'border-teal-700 bg-teal-50 font-semibold' : 'border-slate-300 bg-white'}`}
           >
@@ -68,6 +72,19 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
       </div>
       {!ctx.canWork && <Notice kind="info">Bạn chưa có vai trò trong group: chỉ xem đơn và nhắn tin. Nhờ admin gán vai trò.</Notice>}
       {view === 'chat' && openId && <OrderDetail key={openId} ctx={ctx} orderId={openId} onClose={() => setOpenId(null)} backLabel="← Về chat" backAlways />}
+      {view === 'chat' && !openId && <TrackedOrders ctx={ctx} selectedId={panelId} onSelect={(id) => setPanelId(panelId === id ? null : id)} />}
+      {view === 'chat' && !openId && panelId && (
+        <CompactPanel
+          key={panelId}
+          ctx={ctx}
+          orderId={panelId}
+          onClose={() => setPanelId(null)}
+          onOpenFull={() => {
+            setOpenId(panelId)
+            setPanelId(null)
+          }}
+        />
+      )}
       {view === 'chat' && !openId && (
         <Card>
           <Chat ctx={ctx} orderId={null} onOpenOrder={setOpenId} />

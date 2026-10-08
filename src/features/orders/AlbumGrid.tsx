@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import { signedImageUrls } from './api'
+import { isExpired } from './imageExpiry'
 import type { Attachment } from './types'
 
 /** Lưới ảnh của một message (1, 2, 3, 4+ ảnh) + xem ảnh lớn. Ảnh lấy bằng signed URL. */
 export function AlbumGrid({ attachments }: { attachments: Attachment[] }) {
   const items = [...attachments].sort((a, b) => a.position - b.position)
-  const key = items.map((a) => a.path).join('|')
+  const now = Date.now()
+  const key = items.filter((a) => !isExpired(a, now)).map((a) => a.path).join('|')
   const [urls, setUrls] = useState<Map<string, string>>(new Map())
   const [failed, setFailed] = useState(false)
   const [tries, setTries] = useState(0)
   const [open, setOpen] = useState<number | null>(null)
 
   useEffect(() => {
+    if (!key) return
     let alive = true
     signedImageUrls(key.split('|')).then(
       (m) => alive && (setUrls(m), setFailed(false)),
@@ -38,7 +41,8 @@ export function AlbumGrid({ attachments }: { attachments: Attachment[] }) {
   const cols = n === 1 ? 'grid-cols-1' : 'grid-cols-2'
 
   function cell(a: Attachment, i: number) {
-    const url = urls.get(a.path)
+    const expired = isExpired(a, now)
+    const url = expired ? undefined : urls.get(a.path)
     const span = n === 3 && i === 0 ? 'col-span-2 aspect-video' : n === 1 ? 'aspect-[4/3]' : 'aspect-square'
     return (
       <button
@@ -48,7 +52,9 @@ export function AlbumGrid({ attachments }: { attachments: Attachment[] }) {
         onClick={() => setOpen(i)}
         className={`relative overflow-hidden rounded-md bg-slate-200 ${span}`}
       >
-        {url ? (
+        {expired ? (
+          <span className="grid h-full place-items-center p-1 text-center text-sm text-slate-500">Ảnh đã hết hạn</span>
+        ) : url ? (
           <img src={url} alt="" loading="lazy" onError={() => setTries((t) => (t < 2 ? t + 1 : t))} className="h-full w-full object-cover" />
         ) : (
           <span className="grid h-full place-items-center text-sm text-slate-500">{failed ? 'Lỗi ảnh' : '…'}</span>
@@ -62,14 +68,16 @@ export function AlbumGrid({ attachments }: { attachments: Attachment[] }) {
   return (
     <>
       <div className={`grid w-full max-w-xs gap-1 sm:max-w-sm ${cols}`}>{shown.map(cell)}</div>
-      {failed && (
+      {failed && key && (
         <button type="button" className="text-sm text-teal-800 underline" onClick={() => setTries((t) => t + 1)}>
           Tải lại ảnh
         </button>
       )}
       {cur && open !== null && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/90" onClick={() => setOpen(null)}>
-          {urls.get(cur.path) ? (
+          {isExpired(cur, now) ? (
+            <span className="text-white" onClick={(e) => e.stopPropagation()}>Ảnh đã hết hạn</span>
+          ) : urls.get(cur.path) ? (
             <img src={urls.get(cur.path)} alt="" className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           ) : (
             <span className="text-white">Không tải được ảnh</span>

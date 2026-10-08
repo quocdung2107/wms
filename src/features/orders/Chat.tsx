@@ -1,34 +1,53 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, inputClass, Notice, useLoad } from '../../shared/ui/ui'
+import { Button, Notice, useLoad } from '../../shared/ui/ui'
 import { AlbumGrid } from './AlbumGrid'
-import { errText, sb, sendMessageWithImages, uploadChatImages } from './api'
+import { errText, pushStatusLine, rpc, STATUS_LINE_PREFIX, sb } from './api'
 import { fmtDay, fmtTime } from './format'
-import { compressImage, MAX_IMAGES, takeImages } from './imageUtils'
-import { AttentionBadge, StatusBadge } from './status'
+import { Composer } from './Composer'
+import { AttentionBadge, StatusBadge, statusOf } from './status'
+import { nextStatus } from './statusFlow'
 import type { Attachment, GroupCtx, Message, Order } from './types'
 import { useRealtime } from './useRealtime'
 
-function OrderCard({ order, loading, onOpen }: { order: Order | undefined; loading: boolean; onOpen?: (id: string) => void }) {
+type Undo = { orderId: string; prev: string; until: number }
+const UNDO_MS = 6000
+
+function OrderCard({
+  order,
+  loading,
+  onOpen,
+  onQuick,
+  quickBusy,
+}: {
+  order: Order | undefined
+  loading: boolean
+  onOpen?: (id: string) => void
+  onQuick?: (order: Order, next: string) => void
+  quickBusy?: boolean
+}) {
   if (!order) return <div className="inline-block rounded-lg bg-white px-3 py-2 text-slate-500">{loading ? 'Đang tải đơn…' : 'Đơn không còn truy cập được.'}</div>
+  const next = nextStatus(order.status)
   return (
-    <button
-      type="button"
-      disabled={!onOpen}
-      onClick={() => onOpen?.(order.id)}
-      className={`block w-full max-w-sm space-y-1 rounded-xl border bg-white p-3 text-left shadow-sm hover:bg-slate-50 ${order.needs_attention ? 'border-red-400' : 'border-teal-600'}`}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm text-slate-600">📦 {order.code}</span>
-        <StatusBadge code={order.status} />
-        {order.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
-        <AttentionBadge reason={order.attention_reason} />
-      </div>
-      <div className="font-semibold">{order.goods}</div>
-      <div className="text-sm text-slate-700">
-        {order.weight_kg} kg · {order.packages} kiện · giao {fmtDay(order.delivery_at)}
-      </div>
-      {onOpen && <div className="text-sm text-teal-800">Bấm để xem, cập nhật trạng thái, nhắn riêng trong đơn →</div>}
-    </button>
+    <div className={`w-full max-w-sm space-y-2 rounded-xl border bg-white p-3 text-left shadow-sm ${order.needs_attention ? 'border-red-400' : 'border-teal-600'}`}>
+      <button type="button" disabled={!onOpen} onClick={() => onOpen?.(order.id)} className="block w-full space-y-1 text-left hover:bg-slate-50">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm text-slate-600">📦 {order.code}</span>
+          <StatusBadge code={order.status} />
+          {order.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
+          <AttentionBadge reason={order.attention_reason} />
+        </div>
+        <div className="font-semibold">{order.goods}</div>
+        <div className="text-sm text-slate-700">
+          {order.weight_kg} kg · {order.packages} kiện · giao {fmtDay(order.delivery_at)}
+        </div>
+        {onOpen && <div className="text-sm text-teal-800">Bấm để xem, cập nhật trạng thái, nhắn riêng trong đơn →</div>}
+      </button>
+      {next && onQuick && (
+        <Button kind="primary" className="w-full" disabled={quickBusy} onClick={() => onQuick(order, next)}>
+          Bước tiếp theo: {statusOf(next).label}
+        </Button>
+      )}
+    </div>
   )
 }
 
@@ -46,18 +65,15 @@ async function withAttachments(msgs: Message[]): Promise<Message[]> {
   return msgs.map((m) => (by.has(m.id) ? { ...m, attachments: by.get(m.id) } : m))
 }
 
-type Picked = { file: File; url: string }
-
 /** Chat chung của group (orderId = null) hoặc chat riêng trong một đơn. */
 export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: string | null; onOpenOrder?: (id: string) => void }) {
   const [extra, setExtra] = useState<Message[]>([])
-  const [body, setBody] = useState('')
   const [err, setErr] = useState('')
   const [ordersTick, setOrdersTick] = useState(0)
-  const [picked, setPicked] = useState<Picked[]>([])
-  const [busy, setBusy] = useState(false)
+  const [quickBusy, setQuickBusy] = useState(false)
+  const [undo, setUndo] = useState<Undo | null>(null)
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  const fileInput = useRef<HTMLInputElement>(null)
 
   const initial = useLoad(async () => {
     let q = sb().from('messages').select('*').eq('group_id', ctx.groupId)
@@ -97,48 +113,47 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
     end.current?.scrollIntoView({ block: 'end' })
   }, [all.length])
 
-  function pick(files: FileList | null) {
-    if (!files || files.length === 0) return
-    const imgs = [...files].filter((f) => f.type.startsWith('image/'))
-    const { list, dropped } = takeImages(picked.map((p) => p.file), imgs)
-    const next = list.map((file, i) => (i < picked.length ? picked[i] : { file, url: URL.createObjectURL(file) }))
-    setPicked(next)
-    setErr(dropped > 0 ? `Mỗi lần gửi tối đa ${MAX_IMAGES} ảnh, đã bỏ ${dropped} ảnh thừa.` : '')
-    if (fileInput.current) fileInput.current.value = ''
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current)
+  }, [])
+
+  function armUndo(u: Undo | null) {
+    if (undoTimer.current) clearTimeout(undoTimer.current)
+    setUndo(u)
+    if (u) undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS)
   }
 
-  function unpick(i: number) {
-    URL.revokeObjectURL(picked[i].url)
-    setPicked(picked.filter((_, k) => k !== i))
-  }
-
-  async function send() {
-    const text = body.trim()
-    if (busy) return
-    if (picked.length > 0) {
-      setErr('')
-      setBusy(true)
-      try {
-        const done = []
-        for (const p of picked) done.push(await compressImage(p.file))
-        const up = await uploadChatImages(ctx.groupId, done)
-        await sendMessageWithImages(ctx.groupId, orderId, text, up)
-        for (const p of picked) URL.revokeObjectURL(p.url)
-        setPicked([])
-        setBody('')
-      } catch (e) {
-        // Chưa tạo message nào; ảnh đã tải (nếu có) bỏ lại trong Storage.
-        setErr(`Gửi ảnh thất bại, chưa gửi gì. ${errText(e)}`)
-      } finally {
-        setBusy(false)
-      }
-      return
-    }
-    if (!text) return
+  async function quick(order: Order, next: string) {
+    if (quickBusy) return
     setErr('')
-    const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, order_id: orderId, sender_id: ctx.me, body: text })
-    if (error) setErr(errText(error))
-    else setBody('')
+    setQuickBusy(true)
+    try {
+      await rpc('change_status', { p_order: order.id, p_status: next, p_note: null })
+      void pushStatusLine(ctx, order, order.status, next)
+      armUndo({ orderId: order.id, prev: order.status, until: Date.now() + UNDO_MS })
+      setOrdersTick((n) => n + 1)
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setQuickBusy(false)
+    }
+  }
+
+  async function doUndo() {
+    if (!undo || quickBusy) return
+    const u = undo
+    setErr('')
+    setQuickBusy(true)
+    try {
+      await rpc('change_status', { p_order: u.orderId, p_status: u.prev, p_note: 'Hoàn tác' })
+      void pushStatusLine(ctx, { id: u.orderId, code: cards.data?.get(u.orderId)?.code ?? '' }, cards.data?.get(u.orderId)?.status ?? u.prev, u.prev)
+      armUndo(null)
+      setOrdersTick((n) => n + 1)
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setQuickBusy(false)
+    }
   }
 
   return (
@@ -151,8 +166,12 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
             <div className="text-xs text-slate-500">
               {m.sender_id === ctx.me ? 'Bạn' : ctx.nameOf(m.sender_id)} · {fmtTime(m.created_at)}
             </div>
-            {m.shared_order_id ? (
-              <OrderCard order={cards.data?.get(m.shared_order_id)} loading={cards.loading} onOpen={onOpenOrder} />
+            {m.shared_order_id && m.body.startsWith(STATUS_LINE_PREFIX) ? (
+              <button type="button" disabled={!onOpenOrder} onClick={() => onOpenOrder?.(m.shared_order_id!)} className="inline-block max-w-full rounded-lg bg-slate-100 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-200">
+                {m.body}
+              </button>
+            ) : m.shared_order_id ? (
+              <OrderCard order={cards.data?.get(m.shared_order_id)} loading={cards.loading} onOpen={onOpenOrder} onQuick={quick} quickBusy={quickBusy} />
             ) : (
               <>
                 {m.attachments && m.attachments.length > 0 && (
@@ -167,37 +186,15 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
         ))}
         <div ref={end} />
       </div>
-      {picked.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {picked.map((p, i) => (
-            <div key={p.url} className="relative h-16 w-16 overflow-hidden rounded-md bg-slate-200">
-              <img src={p.url} alt="" className="h-full w-full object-cover" />
-              <button type="button" aria-label="Bỏ ảnh này" disabled={busy} onClick={() => unpick(i)} className="absolute right-0 top-0 h-6 w-6 rounded-bl-md bg-black/60 text-white">
-                ×
-              </button>
-            </div>
-          ))}
-          <span className="self-center text-sm text-slate-600">
-            {picked.length}/{MAX_IMAGES} ảnh{busy ? ' · đang nén và tải lên…' : ''}
-          </span>
+      {undo && (
+        <div role="status" className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 px-3 py-2 text-white">
+          <span>Đã đổi trạng thái đơn.</span>
+          <button type="button" disabled={quickBusy} onClick={() => void doUndo()} className="min-h-11 rounded-md px-3 font-semibold underline disabled:opacity-50">
+            Hoàn tác
+          </button>
         </div>
       )}
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void send()
-        }}
-      >
-        <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => pick(e.target.files)} />
-        <Button aria-label="Đính kèm ảnh" disabled={busy} onClick={() => fileInput.current?.click()}>
-          📎
-        </Button>
-        <input className={inputClass} maxLength={2000} placeholder={picked.length ? 'Chú thích (tuỳ chọn)…' : 'Nhập tin nhắn…'} value={body} onChange={(e) => setBody(e.target.value)} />
-        <Button type="submit" kind="primary" disabled={busy || (!body.trim() && picked.length === 0)}>
-          {busy ? 'Đang gửi…' : 'Gửi'}
-        </Button>
-      </form>
+      <Composer ctx={ctx} orderId={orderId} />
       {err && <Notice kind="error">{err}</Notice>}
     </div>
   )

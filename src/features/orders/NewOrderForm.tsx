@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui'
-import { errText, rpc } from './api'
+import { errText, pushOrderCard, rpc } from './api'
 import { localToIso } from './format'
 import type { GroupCtx } from './types'
 
@@ -36,6 +36,11 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
         p_customer_name: f.customer,
         p_customer_address: f.customerAddr,
       })) as string
+      try {
+        await pushOrderCard(ctx, { id, code: f.code || id, goods: f.goods })
+      } catch {
+        alert('Đã tạo đơn, nhưng chưa thêm được thẻ đơn vào chat. Có thể gửi lại từ màn chi tiết đơn.')
+      }
       onCreated(id)
     } catch (e) {
       setErr(errText(e))
