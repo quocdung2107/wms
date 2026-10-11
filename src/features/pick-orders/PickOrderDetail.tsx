@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import PickForm, { fromInputDt, toInputDt, type LocTarget } from '../sku-lookup/PickForm.tsx'
-import { deletePick, getPickedBySku, locKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
+import { buildPickExport, deletePick, getPickedBySku, getSkuStockInfo, locKey, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
 import { getRowsBySku, getUomMap, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
+import { exportRows } from '../../shared/inventory/exportFile.ts'
 import { makeUomLabeler } from '../../shared/inventory/uom.ts'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 import {
-  addLines, deleteLine, deletePickOrder, getPickOrder, listLines, listOrderPicks, setLineNeed, setOrderRef,
+  addLines, deleteLine, deletePickOrder, getPickOrder, listLines, listOrderPicks, setAllowSkuTag, setLineNeed, setOrderRef,
   type PickOrderLine,
 } from './api.ts'
 import { lineProgress, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
@@ -17,6 +18,8 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   const order = useLoad(() => getPickOrder(id), [id])
   const lines = useLoad(() => listLines(id), [id])
   const picks = useLoad(() => listOrderPicks(id), [id])
+  const lineSkus = useMemo(() => (lines.data ?? []).map((l) => l.sku), [lines.data])
+  const info = useLoad(() => getSkuStockInfo(lineSkus), [lineSkus.join('|'), picks.data])
   const [refText, setRefText] = useState<string | null>(null)
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<SkuHit[]>([])
@@ -38,6 +41,14 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   const o = order.data
   const fail = (e: unknown) => setErr(e instanceof Error ? e.message : String(e))
   const reloadAll = () => { lines.reload(); picks.reload() }
+
+  async function doExport(kind: 'xlsx' | 'csv') {
+    if (!o) return
+    try {
+      const list = picks.data ?? []
+      await exportRows(buildPickExport(list, await getSkuStockInfo(list.map((p) => p.sku))), `picking-${o.code}`, kind)
+    } catch (e) { fail(e) }
+  }
 
   async function addBySku() {
     const code = sku?.sku ?? term.trim()
@@ -138,9 +149,16 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
               <Button disabled={refText === null} onClick={saveRef}>Lưu</Button>
             </div>
           </Field>
+          <label className="flex min-h-11 items-center gap-3">
+            <input
+              type="checkbox" className="h-5 w-5 shrink-0" checked={o.allow_sku_tag}
+              onChange={(e) => setAllowSkuTag(id, e.target.checked).then(order.reload, fail)}
+            />
+            <span>Cho phép gắn thẻ SKU từ Tra SKU</span>
+          </label>
         </Card>
       )}
-      {(err || order.error || lines.error || picks.error) && <Notice kind="error">{err || order.error || lines.error || picks.error}</Notice>}
+      {(err || order.error || lines.error || picks.error || info.error) && <Notice kind="error">{err || order.error || lines.error || picks.error || info.error}</Notice>}
       {msg && <Notice kind="info">{msg}</Notice>}
       {errs.length > 0 && (
         <Notice kind="warn">
@@ -179,12 +197,17 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(lines.data ?? []).map((l) => {
           const pr = lineProgress(l.qty_need, done.get(l.sku.toUpperCase()) ?? 0)
+          const i = info.data?.get(skuKey(l.sku))
           return (
             <Card key={l.id} className="space-y-2">
               <p className="text-lg font-bold">{l.sku}</p>
               {l.description && <p className="text-sm text-slate-600">{l.description}</p>}
               <p>Cần <b>{fmtQty(pr.need)}</b> · Đã lấy <b>{fmtQty(pr.picked)}</b> · Còn thiếu{' '}
                 <b className={pr.missing > 0 ? 'text-red-700' : 'text-green-700'}>{fmtQty(pr.missing)}</b> {l.uom}</p>
+              {i && (
+                <p className="text-sm text-slate-600">Tổng hệ thống <b>{fmtQty(i.total)}</b> · Tồn ước tính{' '}
+                  <b className={i.estimate < 0 ? 'text-red-700' : ''}>{fmtQty(i.estimate)}</b> · Hold <b>{fmtQty(i.hold)}</b> {l.uom}</p>
+              )}
               {pr.extra > 0 && <Notice kind="warn">Lấy dư {fmtQty(pr.extra)} {l.uom}.</Notice>}
               <div className="h-3 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuenow={pr.pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Tiến độ ${l.sku}`}>
                 <div className={`h-full ${pr.extra > 0 ? 'bg-amber-500' : 'bg-teal-600'}`} style={{ width: `${pr.pct}%` }} />
@@ -200,6 +223,10 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       </div>
 
       <h3 className="text-lg font-bold">Lịch sử lấy của đơn</h3>
+      <div className="flex gap-2">
+        <Button disabled={(picks.data?.length ?? 0) === 0} onClick={() => doExport('xlsx')}>Xuất Excel</Button>
+        <Button disabled={(picks.data?.length ?? 0) === 0} onClick={() => doExport('csv')}>Xuất CSV</Button>
+      </div>
       {!picks.loading && (picks.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa lấy lần nào.</p>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(picks.data ?? []).map((p) => (

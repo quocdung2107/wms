@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  sumPicked, estimateStock, locKey, nowLocal, dateBounds,
+  sumPicked, estimateStock, skuStockInfo, locKey, nowLocal, dateBounds,
   buildCountExport, buildPickExport, type CountSession, type Pick, type PickLike,
 } from '../src/shared/inventory/history.ts'
 
@@ -60,4 +60,34 @@ test('buildPickExport: số đơn trống, csvSafe', () => {
   assert.equal(rows[1][8], '')
   assert.equal(rows[1][9], "'-cmd")
   assert.equal(rows[1][7], 2)
+  assert.deepEqual(rows[0].slice(10), ['Tổng hệ thống', 'Tồn ước tính', 'Hold'])
+  assert.deepEqual(rows[1].slice(10), ['', '', ''])
+})
+
+test('buildPickExport: có info -> 3 cột cuối', () => {
+  const k: Pick = {
+    id: 1, sku: 's1', description: '=d', source: 'A', location: 'L', batch_no: '', uom: '', qty: 2,
+    order_no: null, picked_at: '2026-10-05 10:00:00', note: '',
+  }
+  const rows = buildPickExport([k], new Map([['S1', { total: 10, picked: 4, estimate: -6, hold: 1 }]]))
+  assert.deepEqual(rows[1].slice(10), [10, -6, 1])
+  assert.equal(rows[1][2], "'=d")
+})
+
+test('skuStockInfo: nhiều nguồn/vị trí, lẻ cũng hold, trước loaded_at, không tồn, tồn âm', () => {
+  const la = { A: '2026-10-05 09:00:00', B: '2026-10-05 09:00:00' }
+  const m = skuStockInfo(
+    [{ sku: 'x1', qty_system: 10 }, { sku: 'X1 ', qty_system: null }, { sku: 'X1', qty_system: 5 }, { sku: 'Y', qty_system: 2 }],
+    [
+      { sku: 'X1', ...p({ qty: 3 }) },
+      { sku: 'x1', ...p({ source: 'B', qty: 4, pick_order_id: 7 }) },
+      { sku: 'X1', ...p({ qty: 9, picked_at: '2026-10-05 08:00:00', pick_order_id: 7 }) },
+      { sku: 'NOSTOCK', ...p({ qty: 6, pick_order_id: 1 }) },
+      { sku: 'Y', ...p({ qty: 5 }) },
+    ],
+    la,
+  )
+  assert.deepEqual(m.get('X1'), { total: 15, picked: 7, estimate: 8, hold: 7 })
+  assert.deepEqual(m.get('NOSTOCK'), { total: 0, picked: 6, estimate: -6, hold: 6 })
+  assert.deepEqual(m.get('Y'), { total: 2, picked: 5, estimate: -3, hold: 5 })
 })

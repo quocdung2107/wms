@@ -1,25 +1,14 @@
 import { useState } from 'react'
 import {
-  buildCountExport, buildPickExport, deleteCount, deletePick, getCountLines, getLinesFor, listCounts, listPicks,
+  buildCountExport, buildPickExport, deleteCount, deletePick, getCountLines, getLinesFor, getSkuStockInfo, listCounts, skuKey, listPicks,
   type CountLine,
 } from '../../shared/inventory/history.ts'
+import { attachPick, detachPick, listPickOrders } from '../pick-orders/api.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
-import { Button, Card, downloadBlob, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
+import { exportRows } from '../../shared/inventory/exportFile.ts'
+import { Button, Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 
 type Tab = 'count' | 'pick'
-
-async function exportRows(aoa: (string | number | boolean | Date | null | undefined)[][], base: string, kind: 'xlsx' | 'csv') {
-  const XLSX = await import('xlsx')
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
-  const stamp = new Date().toISOString().slice(0, 10)
-  if (kind === 'csv') {
-    downloadBlob(`${base}-${stamp}.csv`, '﻿' + XLSX.utils.sheet_to_csv(ws), 'text/csv;charset=utf-8')
-  } else {
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-    downloadBlob(`${base}-${stamp}.xlsx`, XLSX.write(wb, { type: 'array', bookType: 'xlsx' }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-  }
-}
 
 export default function HistoryPage({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<Tab>('count')
@@ -33,6 +22,28 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
   const key = [sku, from, to]
   const counts = useLoad(() => listCounts(filter), key)
   const picks = useLoad(() => listPicks(filter), key)
+  const orders = useLoad(() => listPickOrders(), [])
+  const [attach, setAttach] = useState<number | null>(null)
+  const pickSkus = [...new Set((picks.data ?? []).map((p) => p.sku))].sort()
+  const info = useLoad(() => getSkuStockInfo(pickSkus), [pickSkus.join('|'), picks.data?.length ?? 0])
+
+  const orderCode = new Map((orders.data ?? []).map((o) => [o.id, o.code]))
+
+  async function doAttach(orderId: number) {
+    if (attach === null) return
+    try {
+      await attachPick(attach, orderId)
+      setErr(''); setAttach(null); picks.reload()
+    } catch (e) {
+      setAttach(null)
+      setErr(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function detach(id: number) {
+    if (!window.confirm('Gỡ lần lấy này khỏi PK? Bản ghi vẫn giữ ở Lịch sử, Đã lấy của PK sẽ giảm.')) return
+    try { await detachPick(id); setErr(''); picks.reload() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+  }
 
   async function toggle(id: number) {
     if (open === id) return setOpen(null)
@@ -56,7 +67,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
         const list = counts.data ?? []
         await exportRows(buildCountExport(list, await getLinesFor(list.map((c) => c.id))), 'lich-su-kiem-ton', kind)
       } else {
-        await exportRows(buildPickExport(picks.data ?? []), 'lich-su-picking', kind)
+        await exportRows(buildPickExport(picks.data ?? [], await getSkuStockInfo((picks.data ?? []).map((p) => p.sku))), 'lich-su-picking', kind)
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -84,6 +95,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
         <Button disabled={empty} onClick={() => doExport('csv')}>Xuất CSV</Button>
       </div>
       {(err || cur.error) && <Notice kind="error">{err || cur.error}</Notice>}
+      {tab === 'pick' && !empty && <p className="text-sm text-slate-500">Tổng hệ thống, Tồn ước tính, Hold là tồn hiện tại của SKU, không phải tại lúc lấy.</p>}
       {!cur.loading && empty && <p className="text-slate-600">Chưa có bản ghi nào.</p>}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -107,17 +119,50 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
             </div>
           </Card>
         ))}
-        {tab === 'pick' && (picks.data ?? []).map((p) => (
+        {tab === 'pick' && (picks.data ?? []).map((p) => {
+          const i = info.data?.get(skuKey(p.sku))
+          return (
           <Card key={p.id} className="space-y-1">
             <p className="text-sm text-slate-500">{p.picked_at}</p>
             <p className="text-lg font-bold">{p.sku} <span className="text-base font-normal">· {p.location || '—'}{p.batch_no ? ` · ${p.batch_no}` : ''}</span></p>
             <p className="text-sm text-slate-600">{p.description}</p>
             <p>Lấy <b>{fmtQty(p.qty)}</b> {p.uom}{p.order_no ? ` · Đơn ${p.order_no}` : ''}</p>
+            {i && (
+              <p className="text-sm text-slate-600">Tổng hệ thống <b>{fmtQty(i.total)}</b> · Tồn ước tính{' '}
+                <b className={i.estimate < 0 ? 'text-red-700' : ''}>{fmtQty(i.estimate)}</b> · Hold <b>{fmtQty(i.hold)}</b> {p.uom} (tồn hiện tại)</p>
+            )}
             {p.note && <p className="text-sm">Ghi chú: {p.note}</p>}
-            <Button kind="danger" onClick={() => remove('pick', p.id)}>Xoá</Button>
+            {p.pick_order_id != null && (
+              <p className="text-sm">PK: <b>{orderCode.get(p.pick_order_id) ?? `#${p.pick_order_id}`}</b></p>
+            )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {p.pick_order_id == null
+                ? <Button className="flex-1" onClick={() => setAttach(p.id)}>Gắn vào PK</Button>
+                : <Button className="flex-1" onClick={() => detach(p.id)}>Gỡ khỏi PK</Button>}
+              <Button kind="danger" onClick={() => remove('pick', p.id)}>Xoá</Button>
+            </div>
           </Card>
-        ))}
+          )
+        })}
       </div>
+      {attach !== null && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Chọn PK">
+          <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto rounded-b-2xl bg-white p-4 md:rounded-2xl">
+            <h2 className="text-xl font-bold">Gắn vào PK</h2>
+            {(orders.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có đơn picking nào.</p>}
+            <ul className="divide-y rounded-lg border border-slate-200">
+              {(orders.data ?? []).map((o) => (
+                <li key={o.id}>
+                  <button type="button" className="block min-h-11 w-full px-3 py-2 text-left" onClick={() => doAttach(o.id)}>
+                    <b>{o.code}</b>{o.name ? <span className="text-sm text-slate-600"> · {o.name}</span> : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <Button className="w-full" onClick={() => setAttach(null)}>Huỷ</Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

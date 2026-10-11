@@ -77,13 +77,52 @@ export function sumPicked(picks: PickLike[], loadedAt: Record<string, string>): 
 /** Tồn ước tính = tồn file - đã lấy (tồn rỗng coi là 0). */
 export const estimateStock = (qtySystem: number | null | undefined, picked: number) => (qtySystem ?? 0) - picked
 
+export interface SkuStockInfo { total: number; picked: number; estimate: number; hold: number }
+
+export const skuKey = (sku: string) => sku.trim().toUpperCase()
+
+/**
+ * Hold = mọi lần lấy (lẻ hoặc thuộc đơn picking). Hiện luôn true; hàm tách riêng
+ * ("hold mở") để sau này lọc theo trạng thái đơn picking.
+ */
+const holdOf = (_p: { pick_order_id?: number | null }) => true
+
+/**
+ * Tồn theo SKU (mọi nguồn/vị trí): total = tổng qty_system; picked = picks >= loaded_at của nguồn;
+ * estimate = total - picked (có thể âm); hold = picked (mọi lần lấy, xem holdOf).
+ */
+export function skuStockInfo(
+  rows: { sku: string; qty_system: number | null }[],
+  picks: (PickLike & { sku: string; pick_order_id?: number | null })[],
+  loadedAt: Record<string, string>,
+): Map<string, SkuStockInfo> {
+  const out = new Map<string, SkuStockInfo>()
+  const get = (sku: string) => {
+    const k = skuKey(sku)
+    let v = out.get(k)
+    if (!v) { v = { total: 0, picked: 0, estimate: 0, hold: 0 }; out.set(k, v) }
+    return v
+  }
+  for (const r of rows) get(r.sku).total += r.qty_system ?? 0
+  for (const p of picks) {
+    const la = loadedAt[p.source ?? '']
+    if (la === undefined || !p.picked_at || p.picked_at < la) continue
+    const v = get(p.sku)
+    const q = p.qty ?? 0
+    v.picked += q
+    if (holdOf(p)) v.hold += q
+  }
+  for (const v of out.values()) v.estimate = estimateStock(v.total, v.picked)
+  return out
+}
+
 /** Điều kiện lọc ngày theo ngày địa phương: [from 00:00:00, to 23:59:59]. */
 export function dateBounds(f: HistoryFilter): { from: string | null; to: string | null } {
   return { from: f.from ? `${f.from} 00:00:00` : null, to: f.to ? `${f.to} 23:59:59` : null }
 }
 
 export const COUNT_EXPORT_HEADER = ['Giờ kiểm', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Tồn hệ thống', 'Tổng đếm', 'Lệch', 'Phép tính', 'Ghi chú']
-export const PICK_EXPORT_HEADER = ['Giờ lấy', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Số lượng', 'Số đơn', 'Ghi chú']
+export const PICK_EXPORT_HEADER = ['Giờ lấy', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Số lượng', 'Số đơn', 'Ghi chú', 'Tổng hệ thống', 'Tồn ước tính', 'Hold']
 
 const safeRow = (cells: Cell[]): Cell[] => cells.map(csvSafe)
 
@@ -102,12 +141,16 @@ export function buildCountExport(sessions: CountSession[], lines: Record<number,
   ]
 }
 
-export function buildPickExport(picks: Pick[]): Cell[][] {
+export function buildPickExport(picks: Pick[], info?: Map<string, SkuStockInfo>): Cell[][] {
   return [
     PICK_EXPORT_HEADER,
-    ...picks.map((p) =>
-      safeRow([p.picked_at, p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no ?? '', p.note]),
-    ),
+    ...picks.map((p) => {
+      const i = info?.get(skuKey(p.sku))
+      return safeRow([
+        p.picked_at, p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no ?? '', p.note,
+        i ? i.total : '', i ? i.estimate : '', i ? i.hold : '',
+      ])
+    }),
   ]
 }
 
@@ -231,4 +274,31 @@ export async function getPickedBySku(sku: string): Promise<Map<string, number>> 
   const srcs = await query('SELECT name, loaded_at FROM sources')
   const loadedAt = Object.fromEntries(srcs.map((s) => [s.name as string, (s.loaded_at as string) ?? '']))
   return sumPicked(picks, loadedAt)
+}
+
+/** Tồn/đã lấy/hold theo SKU (không phân biệt hoa thường), gom từ SQLite. */
+export async function getSkuStockInfo(skus: string[]): Promise<Map<string, SkuStockInfo>> {
+  const keys = [...new Set(skus.map(skuKey).filter(Boolean))]
+  if (keys.length === 0) return new Map()
+  const { query } = await db()
+  const srcs = await query('SELECT id, name, loaded_at FROM sources')
+  const nameById = new Map(srcs.map((s) => [s.id as number, s.name as string]))
+  const loadedAt = Object.fromEntries(srcs.map((s) => [s.name as string, (s.loaded_at as string) ?? '']))
+  const rows: { sku: string; qty_system: number | null }[] = []
+  const picks: (PickLike & { sku: string; pick_order_id: number | null })[] = []
+  for (let i = 0; i < keys.length; i += 200) {
+    const chunk = keys.slice(i, i + 200)
+    const ph = chunk.map(() => '?').join(',')
+    for (const r of await query(`SELECT sku, qty_system, source_id FROM inventory_rows WHERE UPPER(TRIM(sku)) IN (${ph})`, chunk)) {
+      if (nameById.has(r.source_id as number)) rows.push({ sku: str(r.sku), qty_system: (r.qty_system as number | null) ?? null })
+    }
+    for (const r of await query(`SELECT sku, source, location, batch_no, qty, picked_at, pick_order_id FROM picks WHERE UPPER(TRIM(sku)) IN (${ph})`, chunk)) {
+      picks.push({
+        sku: str(r.sku), source: str(r.source), location: str(r.location), batch_no: str(r.batch_no),
+        qty: (r.qty as number | null) ?? 0, picked_at: str(r.picked_at),
+        pick_order_id: r.pick_order_id == null ? null : (r.pick_order_id as number),
+      })
+    }
+  }
+  return skuStockInfo(rows, picks, loadedAt)
 }

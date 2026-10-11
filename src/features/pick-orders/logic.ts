@@ -104,3 +104,25 @@ export function picksUpgradeSql(columns: string[]): string[] {
   out.push('CREATE INDEX IF NOT EXISTS idx_picks_order ON picks(pick_order_id)')
   return out
 }
+
+/** Cột allow_sku_tag cho pick_orders có sẵn: chỉ ALTER khi thiếu (columns từ PRAGMA table_info(pick_orders)). */
+export function pickOrdersUpgradeSql(columns: string[]): string[] {
+  return columns.includes('allow_sku_tag') ? [] : ['ALTER TABLE pick_orders ADD COLUMN allow_sku_tag INTEGER NOT NULL DEFAULT 0']
+}
+
+export type AttachPlan = { ok: true; addLine: PickLine | null } | { ok: false; error: string }
+
+/**
+ * Quyết định khi gắn một lần lấy vào PK: đã có dòng cùng SKU -> chỉ gắn (không đổi qty_need);
+ * chưa có và được phép -> gắn và thêm dòng mới (qty_need = qty của pick); chưa có và tắt -> lỗi.
+ */
+export function planAttach(
+  lines: { sku: string }[],
+  pick: { sku: string; description: string; uom: string; qty: number },
+  allow: boolean,
+): AttachPlan {
+  const k = pick.sku.trim().toUpperCase()
+  if (lines.some((l) => l.sku.trim().toUpperCase() === k)) return { ok: true, addLine: null }
+  if (!allow) return { ok: false, error: 'PK chưa có SKU này và chưa bật cho phép gắn thẻ SKU' }
+  return { ok: true, addLine: { sku: pick.sku.trim(), description: pick.description, uom: pick.uom, qty_need: pick.qty } }
+}

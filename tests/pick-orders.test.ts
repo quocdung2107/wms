@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
 import { readWorkbook } from '../src/shared/excel/reader.ts'
 import {
-  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql,
+  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql, pickOrdersUpgradeSql, planAttach,
 } from '../src/features/pick-orders/logic.ts'
 
 test('formatPkCode: PK-0001, tăng dần, quá 4 chữ số vẫn đúng', () => {
@@ -74,4 +74,20 @@ test('picksUpgradeSql: DB cũ chưa có cột -> ALTER; đã có -> không ALTER
   assert.ok(up.some((s) => /CREATE INDEX IF NOT EXISTS idx_picks_order/.test(s)))
   const again = picksUpgradeSql([...old, 'pick_order_id'])
   assert.ok(!again.some((s) => /ALTER/.test(s)))
+})
+
+test('pickOrdersUpgradeSql: thiếu cột -> ALTER, đủ -> rỗng', () => {
+  assert.ok(pickOrdersUpgradeSql(['id', 'code']).some((q) => q.includes('ADD COLUMN allow_sku_tag')))
+  assert.deepEqual(pickOrdersUpgradeSql(['id', 'allow_sku_tag']), [])
+})
+
+test('planAttach: 3 trường hợp', () => {
+  const pick = { sku: 'a1', description: 'Hàng A', uom: 'Cái', qty: 4 }
+  assert.deepEqual(planAttach([{ sku: 'A1' }], pick, false), { ok: true, addLine: null })
+  assert.deepEqual(planAttach([{ sku: 'B2' }], pick, true), {
+    ok: true, addLine: { sku: 'a1', description: 'Hàng A', uom: 'Cái', qty_need: 4 },
+  })
+  const r = planAttach([], pick, false)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.match(r.error, /chưa bật cho phép gắn thẻ SKU/)
 })

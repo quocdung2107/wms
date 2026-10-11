@@ -2,7 +2,7 @@
 import { batch, query } from '../../shared/db/client.ts'
 import { nowLocal, type Pick } from '../../shared/inventory/history.ts'
 import { initSchema } from '../../shared/inventory/repo.ts'
-import { mergeLines, normOrderRef, type PickLine } from './logic.ts'
+import { mergeLines, normOrderRef, planAttach, type PickLine } from './logic.ts'
 
 export interface PickOrder {
   id: number
@@ -11,6 +11,7 @@ export interface PickOrder {
   status: string
   order_ref: string | null
   created_at: string
+  allow_sku_tag: boolean
 }
 export interface PickOrderLine extends PickLine { id: number }
 
@@ -18,6 +19,7 @@ const str = (v: unknown) => (v == null ? '' : String(v))
 const toOrder = (r: Record<string, unknown>): PickOrder => ({
   id: r.id as number, code: str(r.code), name: str(r.name), status: str(r.status) || 'open',
   order_ref: r.order_ref == null ? null : String(r.order_ref), created_at: str(r.created_at),
+  allow_sku_tag: Number(r.allow_sku_tag) === 1,
 })
 
 export async function listPickOrders(): Promise<PickOrder[]> {
@@ -105,4 +107,35 @@ export async function listOrderPicks(orderId: number): Promise<Pick[]> {
     order_no: r.order_no == null ? null : String(r.order_no), picked_at: str(r.picked_at), note: str(r.note),
     pick_order_id: orderId,
   }))
+}
+
+export async function setAllowSkuTag(id: number, on: boolean): Promise<void> {
+  await initSchema()
+  await query('UPDATE pick_orders SET allow_sku_tag = ? WHERE id = ?', [on ? 1 : 0, id])
+}
+
+/** Gắn một lần lấy lẻ vào PK; tự thêm dòng Cần khi PK chưa có SKU và đã bật cho phép. */
+export async function attachPick(pickId: number, orderId: number): Promise<void> {
+  await initSchema()
+  const [p] = await query('SELECT * FROM picks WHERE id = ?', [pickId])
+  if (!p) throw new Error('Không tìm thấy lần lấy')
+  if (p.pick_order_id != null) throw new Error('Lần lấy này đã thuộc một PK')
+  const order = await getPickOrder(orderId)
+  if (!order) throw new Error('Không tìm thấy PK')
+  const plan = planAttach(await listLines(orderId), {
+    sku: str(p.sku), description: str(p.description), uom: str(p.uom), qty: (p.qty as number) ?? 0,
+  }, order.allow_sku_tag)
+  if (!plan.ok) throw new Error(plan.error)
+  const stmts = [{ sql: 'UPDATE picks SET pick_order_id = ? WHERE id = ? AND pick_order_id IS NULL', bind: [orderId, pickId] as (string | number | null)[] }]
+  if (plan.addLine) {
+    const l = plan.addLine
+    stmts.push({ sql: 'INSERT INTO pick_order_lines (pick_order_id, sku, description, uom, qty_need) VALUES (?,?,?,?,?)', bind: [orderId, l.sku, l.description, l.uom, l.qty_need] })
+  }
+  await batch(stmts)
+}
+
+/** Gỡ lần lấy khỏi PK (bản ghi giữ nguyên; dòng Cần đã tự thêm không bị xoá). */
+export async function detachPick(pickId: number): Promise<void> {
+  await initSchema()
+  await query('UPDATE picks SET pick_order_id = NULL WHERE id = ?', [pickId])
 }
