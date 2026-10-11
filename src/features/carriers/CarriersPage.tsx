@@ -101,7 +101,7 @@ function List({ loggedIn, userId }: { loggedIn: boolean; userId?: string }) {
               </span>
               <span className="flex flex-wrap gap-2 text-xs">
                 <span className="rounded-full bg-slate-100 px-2 py-0.5">{SOURCE_LABELS[c.source]}</span>
-                <span className="rounded-full bg-teal-50 px-2 py-0.5 text-teal-800">{freshnessLabel(c.last_verified_at)}</span>
+                <span className="rounded-full bg-brand-50 px-2 py-0.5 text-brand-800">{freshnessLabel(c.last_verified_at)}</span>
               </span>
             </button>
           </li>

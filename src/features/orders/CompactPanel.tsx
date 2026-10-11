@@ -61,7 +61,7 @@ export function CompactPanel({ ctx, orderId, onClose, onOpenFull }: { ctx: Group
               <select className={inputClass} value={chosen} onChange={(e) => setStatus(e.target.value)}>
                 {next.map((s) => (
                   <option key={s.code} value={s.code}>
-                    {s.icon} {s.label}
+                    {s.label}
                   </option>
                 ))}
               </select>
@@ -74,7 +74,7 @@ export function CompactPanel({ ctx, orderId, onClose, onOpenFull }: { ctx: Group
       {events.length > 0 && (
         <ol className="space-y-1">
           {events.map((e) => (
-            <li key={e.id} className="border-l-2 border-teal-600 pl-3 text-sm">
+            <li key={e.id} className="border-l-2 border-brand-600 pl-3 text-sm">
               <span className="text-slate-600">
                 {fmtTime(e.created_at)} — {ctx.nameOf(e.actor_id)}:{' '}
               </span>

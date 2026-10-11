@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { errText, pushOrderCard, rpc } from './api'
 import { localToIso } from './format'
 import type { GroupCtx } from './types'
+import { noticeDialog } from '../../shared/ui/Dialog'
 
 export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id: string) => void }) {
   const [f, setF] = useState({ code: '', goods: '', weight: '', packages: '', pickupAt: '', deliveryAt: '', pickupAddr: '', deliveryAddr: '', contact: '', phone: '', customer: '', customerAddr: '', urgent: false })
@@ -39,7 +41,7 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
       try {
         await pushOrderCard(ctx, { id, code: f.code || id, goods: f.goods })
       } catch {
-        alert('Đã tạo đơn, nhưng chưa thêm được thẻ đơn vào chat. Có thể gửi lại từ màn chi tiết đơn.')
+        await noticeDialog('Đã tạo đơn, nhưng chưa thêm được thẻ đơn vào chat. Có thể gửi lại từ màn chi tiết đơn.')
       }
       onCreated(id)
     } catch (e) {
@@ -99,7 +101,7 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
         </Field>
         <label className="flex min-h-11 items-center gap-2 text-base">
           <input type="checkbox" className="size-5" checked={f.urgent} onChange={(e) => setF((x) => ({ ...x, urgent: e.target.checked }))} />
-          🔥 Đơn gấp
+          <Icon name="flame" /> Đơn gấp
         </label>
         <Button type="submit" kind="primary" disabled={busy || !ready}>
           Tạo đơn

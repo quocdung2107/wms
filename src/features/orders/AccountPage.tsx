@@ -4,7 +4,7 @@ import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/u
 import { LoginForm } from './LoginForm'
 import { useSession } from './useSession'
 
-/** Tab Tôi: tên hiển thị + đăng xuất. */
+/** Trang Tài khoản: tên hiển thị + đăng xuất. */
 export default function AccountPage() {
   const session = useSession()
   if (!supabase) return <Notice kind="warn">Chưa cấu hình Supabase (thiếu VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).</Notice>

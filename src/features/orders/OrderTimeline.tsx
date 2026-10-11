@@ -32,7 +32,7 @@ export function OrderTimeline({ ctx, events }: { ctx: GroupCtx; events: OrderEve
         <h3 className="text-lg font-semibold">Timeline</h3>
         <ol className="space-y-2">
           {events.map((e) => (
-            <li key={e.id} className="border-l-2 border-teal-600 pl-3">
+            <li key={e.id} className="border-l-2 border-brand-600 pl-3">
               <div className="text-sm text-slate-600">
                 {fmtTime(e.created_at)} — {ctx.nameOf(e.actor_id)}
               </div>

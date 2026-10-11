@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Notice, useLoad } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { AlbumGrid } from './AlbumGrid'
 import { errText, pushStatusLine, rpc, STATUS_LINE_PREFIX, sb } from './api'
 import { fmtDay, fmtTime } from './format'
@@ -28,19 +29,19 @@ function OrderCard({
   if (!order) return <div className="inline-block rounded-lg bg-white px-3 py-2 text-slate-500">{loading ? 'Đang tải đơn…' : 'Đơn không còn truy cập được.'}</div>
   const next = nextStatus(order.status)
   return (
-    <div className={`w-full max-w-sm space-y-2 rounded-xl border bg-white p-3 text-left shadow-sm ${order.needs_attention ? 'border-red-400' : 'border-teal-600'}`}>
+    <div className={`w-full max-w-sm space-y-2 rounded-xl border bg-white p-3 text-left shadow-sm ${order.needs_attention ? 'border-red-400' : 'border-brand-600'}`}>
       <button type="button" disabled={!onOpen} onClick={() => onOpen?.(order.id)} className="block w-full space-y-1 text-left hover:bg-slate-50">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm text-slate-600">📦 {order.code}</span>
+          <span className="inline-flex items-center gap-1 font-mono text-sm text-slate-600"><Icon name="box" size={14} /> {order.code}</span>
           <StatusBadge code={order.status} />
-          {order.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
+          {order.priority === 'URGENT' && <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white"><Icon name="flame" size={14} /> Gấp</span>}
           <AttentionBadge reason={order.attention_reason} />
         </div>
         <div className="font-semibold">{order.goods}</div>
         <div className="text-sm text-slate-700">
           {order.weight_kg} kg · {order.packages} kiện · giao {fmtDay(order.delivery_at)}
         </div>
-        {onOpen && <div className="text-sm text-teal-800">Bấm để xem, cập nhật trạng thái, nhắn riêng trong đơn →</div>}
+        {onOpen && <div className="text-sm text-brand-800">Bấm để xem, cập nhật trạng thái, nhắn riêng trong đơn →</div>}
       </button>
       {next && onQuick && (
         <Button kind="primary" className="w-full" disabled={quickBusy} onClick={() => onQuick(order, next)}>
@@ -179,7 +180,7 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
                     <AlbumGrid attachments={m.attachments} />
                   </div>
                 )}
-                {m.body && <div className={`inline-block max-w-full whitespace-pre-wrap break-words rounded-lg px-3 py-1.5 text-left ${m.sender_id === ctx.me ? 'bg-teal-100' : 'bg-white'}`}>{m.body}</div>}
+                {m.body && <div className={`inline-block max-w-full whitespace-pre-wrap break-words rounded-lg px-3 py-1.5 text-left ${m.sender_id === ctx.me ? 'bg-brand-100' : 'bg-white'}`}>{m.body}</div>}
               </>
             )}
           </div>

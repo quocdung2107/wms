@@ -7,6 +7,7 @@ import { attachPick, detachPick, listPickOrders } from '../pick-orders/api.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
 import { Button, Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
+import { confirmDialog } from '../../shared/ui/Dialog'
 
 type Tab = 'count' | 'pick'
 
@@ -41,7 +42,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
   }
 
   async function detach(id: number) {
-    if (!window.confirm('Gỡ lần lấy này khỏi PK? Bản ghi vẫn giữ ở Lịch sử, Đã lấy của PK sẽ giảm.')) return
+    if (!(await confirmDialog('Gỡ lần lấy này khỏi PK? Bản ghi vẫn giữ ở Lịch sử, Đã lấy của PK sẽ giảm.'))) return
     try { await detachPick(id); setErr(''); picks.reload() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
   }
 
@@ -52,7 +53,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
   }
 
   async function remove(kind: Tab, id: number) {
-    if (!window.confirm('Xoá bản ghi này? Không hoàn tác được.')) return
+    if (!(await confirmDialog('Xoá bản ghi này? Không hoàn tác được.', { danger: true }))) return
     try {
       if (kind === 'count') { await deleteCount(id); counts.reload() } else { await deletePick(id); picks.reload() }
       if (open === id) setOpen(null)
@@ -84,7 +85,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
     <div className="space-y-3">
       <Button onClick={onBack}>← Tra SKU</Button>
       <h2 className="text-xl font-bold">Lịch sử</h2>
-      <div className="flex gap-2">{tabBtn('count', 'Kiểm tồn')}{tabBtn('pick', 'Picking')}</div>
+      <div className="flex gap-2">{tabBtn('count', 'Kiểm tồn')}{tabBtn('pick', 'Lấy hàng')}</div>
       <div className="grid gap-2 sm:grid-cols-3">
         <input className={inputClass} value={sku} placeholder="Lọc theo SKU" aria-label="Lọc SKU" onChange={(e) => setSku(e.target.value)} />
         <input className={inputClass} type="date" value={from} aria-label="Từ ngày" onChange={(e) => setFrom(e.target.value)} />
@@ -149,7 +150,7 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Chọn PK">
           <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto rounded-b-2xl bg-white p-4 md:rounded-2xl">
             <h2 className="text-xl font-bold">Gắn vào PK</h2>
-            {(orders.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có đơn picking nào.</p>}
+            {(orders.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có lệnh lấy hàng nào.</p>}
             <ul className="divide-y rounded-lg border border-slate-200">
               {(orders.data ?? []).map((o) => (
                 <li key={o.id}>

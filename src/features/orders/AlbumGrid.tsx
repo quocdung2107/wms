@@ -69,7 +69,7 @@ export function AlbumGrid({ attachments }: { attachments: Attachment[] }) {
     <>
       <div className={`grid w-full max-w-xs gap-1 sm:max-w-sm ${cols}`}>{shown.map(cell)}</div>
       {failed && key && (
-        <button type="button" className="text-sm text-teal-800 underline" onClick={() => setTries((t) => t + 1)}>
+        <button type="button" className="text-sm text-brand-800 underline" onClick={() => setTries((t) => t + 1)}>
           Tải lại ảnh
         </button>
       )}

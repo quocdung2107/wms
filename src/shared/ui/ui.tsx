@@ -8,7 +8,7 @@ export function Button({
   ...p
 }: ButtonHTMLAttributes<HTMLButtonElement> & { kind?: 'primary' | 'secondary' | 'danger' }) {
   const style = {
-    primary: 'bg-teal-700 text-white hover:bg-teal-800',
+    primary: 'bg-brand-600 text-white hover:bg-brand-700',
     secondary: 'border border-slate-300 bg-white text-slate-800 hover:bg-slate-50',
     danger: 'border border-red-300 bg-white text-red-700 hover:bg-red-50',
   }[kind]

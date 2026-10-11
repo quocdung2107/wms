@@ -78,7 +78,7 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
               <select className={inputClass} value={chosenStatus} onChange={(e) => setStatus(e.target.value)}>
                 {nextStatuses.map((s) => (
                   <option key={s.code} value={s.code}>
-                    {s.icon} {s.label}
+                    {s.label}
                   </option>
                 ))}
               </select>

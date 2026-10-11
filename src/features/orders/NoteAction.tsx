@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Button, Field, inputClass, Notice } from '../../shared/ui/ui'
 import { errText } from './api'
+import { confirmDialog } from '../../shared/ui/Dialog'
 
 /** Một hành động có ô ghi chú: gọi onSubmit(note), hiện lỗi tiếng Việt nếu RPC từ chối. */
 export function NoteAction({
@@ -27,7 +28,7 @@ export function NoteAction({
   const [err, setErr] = useState('')
 
   async function go() {
-    if (confirmText && !window.confirm(confirmText)) return
+    if (confirmText && !(await confirmDialog(confirmText))) return
     setBusy(true)
     setErr('')
     try {

@@ -27,7 +27,7 @@ export default function PickOrdersPage() {
   return (
     <div className="space-y-4">
       <Card className="space-y-3">
-        <h2 className="text-xl font-bold">Tạo đơn picking</h2>
+        <h2 className="text-xl font-bold">Tạo lệnh lấy hàng</h2>
         <Field label="Tên / ghi chú (có thể để trống)">
           <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -38,7 +38,7 @@ export default function PickOrdersPage() {
         <Button kind="primary" onClick={create}>Tạo đơn (mã PK tự đánh số)</Button>
       </Card>
       {orders.error && <Notice kind="error">{orders.error}</Notice>}
-      {!orders.loading && (orders.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có đơn picking nào.</p>}
+      {!orders.loading && (orders.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có lệnh lấy hàng nào.</p>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(orders.data ?? []).map((o) => (
           <Card key={o.id} className="space-y-1">

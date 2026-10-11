@@ -73,7 +73,7 @@ function Groups({ me }: { me: string }) {
             role="tab"
             aria-selected={current?.id === g.id}
             onClick={() => pick(g.id)}
-            className={`min-h-11 max-w-full truncate rounded-lg border px-4 text-base ${current?.id === g.id ? 'border-teal-700 bg-teal-700 font-semibold text-white' : 'border-slate-300 bg-white'}`}
+            className={`min-h-11 max-w-full truncate rounded-lg border px-4 text-base ${current?.id === g.id ? 'border-brand-600 bg-brand-600 font-semibold text-white' : 'border-slate-300 bg-white'}`}
           >
             {g.name}
           </button>

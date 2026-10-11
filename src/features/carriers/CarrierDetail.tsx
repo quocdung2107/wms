@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button, Card, Notice } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { carrierErr, verifyCarrier } from './api'
 import { freshnessLabel } from './freshness'
 import { SOURCE_LABELS, type Carrier } from './types'
@@ -34,7 +35,7 @@ export function CarrierDetail({ c, loggedIn, userId, onBack, onSuggest, onEditOw
         <h2 className="text-xl font-bold">{c.name}</h2>
         <p className="flex flex-wrap gap-2 text-sm">
           <span className="rounded-full bg-slate-100 px-2 py-0.5">{SOURCE_LABELS[c.source]}</span>
-          <span className="rounded-full bg-teal-50 px-2 py-0.5 text-teal-800">{freshnessLabel(c.last_verified_at)}</span>
+          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-brand-800">{freshnessLabel(c.last_verified_at)}</span>
         </p>
         {c.description && <p className="whitespace-pre-line text-base">{c.description}</p>}
         <dl className="grid gap-2 sm:grid-cols-2">
@@ -51,14 +52,14 @@ export function CarrierDetail({ c, loggedIn, userId, onBack, onSuggest, onEditOw
       <Card className="space-y-3">
         <h3 className="font-semibold">Liên hệ</h3>
         {!loggedIn ? (
-          <Notice>Đăng nhập (tab Tôi) để xem số điện thoại và Zalo.</Notice>
+          <Notice>Đăng nhập (avatar → Tài khoản) để xem số điện thoại và Zalo.</Notice>
         ) : !phone && !zalo && !email ? (
           <p className="text-slate-600">Chưa có thông tin liên hệ.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {phone && <a className={`${btn} bg-teal-700 text-white`} href={`tel:${digits(phone)}`}>📞 Gọi {phone}</a>}
+            {phone && <a className={`${btn} bg-brand-600 text-white`} href={`tel:${digits(phone)}`}><Icon name="phone" /> Gọi {phone}</a>}
             {zalo && <a className={`${btn} border border-slate-300 bg-white`} href={zaloHref(zalo)} target="_blank" rel="noreferrer">Zalo {zalo}</a>}
-            {email && <a className={`${btn} border border-slate-300 bg-white`} href={`mailto:${email}`}>✉️ {email}</a>}
+            {email && <a className={`${btn} border border-slate-300 bg-white`} href={`mailto:${email}`}><Icon name="mail" /> {email}</a>}
           </div>
         )}
       </Card>

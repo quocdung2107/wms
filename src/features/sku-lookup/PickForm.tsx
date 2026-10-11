@@ -18,7 +18,7 @@ export interface LocTarget {
   picked: number
 }
 
-/** Lấy hàng theo đơn picking: SKU + đơn điền sẵn; người lấy tự chọn vị trí/lô trong `choices` hoặc gõ tay. */
+/** Lấy hàng theo lệnh lấy hàng: SKU + đơn điền sẵn; người lấy tự chọn vị trí/lô trong `choices` hoặc gõ tay. */
 export interface PickOrderCtx {
   id: number
   code: string

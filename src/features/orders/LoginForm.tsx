@@ -33,7 +33,7 @@ export function LoginForm() {
   return (
     <>
     <Card className="mx-auto max-w-md space-y-4">
-      <p className="text-slate-700">Đăng nhập để dùng Đơn hàng. Công cụ kho không cần đăng nhập.</p>
+      <p className="text-slate-700">Đăng nhập để dùng Đơn & chat. Kho không cần đăng nhập.</p>
       {!sent ? (
         <form
           className="space-y-3"

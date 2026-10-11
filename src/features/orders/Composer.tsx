@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Button, inputClass, Notice, useLoad } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { errText, rpc, sb, sendMessageWithImages, uploadChatImages } from './api'
 import { compressImage, MAX_IMAGES, takeImages } from './imageUtils'
 import type { GroupCtx, Order } from './types'
@@ -114,7 +115,7 @@ export function Composer({ ctx, orderId }: { ctx: GroupCtx; orderId: string | nu
           setErr('')
           setInfo('')
         }}
-        className={`min-h-11 flex-1 rounded-md px-3 font-medium ${mode === m ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+        className={`min-h-11 flex-1 rounded-md px-3 font-medium ${mode === m ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
       >
         {label}
       </button>
@@ -152,7 +153,7 @@ export function Composer({ ctx, orderId }: { ctx: GroupCtx; orderId: string | nu
       >
         <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={(e) => pick(e.target.files)} />
         <Button aria-label="Đính kèm ảnh" disabled={busy || note} onClick={() => fileInput.current?.click()}>
-          📎
+          <Icon name="paperclip" size={20} />
         </Button>
         <input
           className={inputClass}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui'
 import { errText, rpc } from './api'
 import { ROLES, roleLabel, type GroupCtx } from './types'
+import { confirmDialog } from '../../shared/ui/Dialog'
 
 function RoleBoxes({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   return (
@@ -54,8 +55,8 @@ export function Members({ ctx }: { ctx: GroupCtx }) {
                 {ctx.isAdmin && (
                   <Button
                     kind="danger"
-                    onClick={() => {
-                      if (window.confirm(`Bỏ ${m.name} khỏi group?`)) void run(() => rpc('remove_member', { p_group: ctx.groupId, p_user: m.user_id }), 'Đã bỏ thành viên.')
+                    onClick={async () => {
+                      if (await confirmDialog(`Bỏ ${m.name} khỏi group?`, { danger: true })) void run(() => rpc('remove_member', { p_group: ctx.groupId, p_user: m.user_id }), 'Đã bỏ thành viên.')
                     }}
                   >
                     Bỏ

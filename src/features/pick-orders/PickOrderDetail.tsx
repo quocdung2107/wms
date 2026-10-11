@@ -11,6 +11,7 @@ import {
   type PickOrderLine,
 } from './api.ts'
 import { lineProgress, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
+import { confirmDialog, promptNumber } from '../../shared/ui/Dialog'
 
 type EditState = { pick: Pick; qty: string; location: string; batch: string; note: string; at: string }
 
@@ -110,12 +111,12 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   }
 
   async function removePick(p: Pick) {
-    if (!window.confirm('Xoá lần lấy này? Số đã lấy sẽ giảm theo.')) return
+    if (!(await confirmDialog('Xoá lần lấy này? Số đã lấy sẽ giảm theo.', { danger: true }))) return
     try { await deletePick(p.id); reloadAll() } catch (e) { fail(e) }
   }
 
   async function removeOrder() {
-    if (!window.confirm('Xoá đơn picking này? Các lần lấy đã ghi vẫn còn ở Lịch sử.')) return
+    if (!(await confirmDialog('Xoá lệnh lấy hàng này? Các lần lấy đã ghi vẫn còn ở Lịch sử.', { danger: true }))) return
     try { await deletePickOrder(id); onBack() } catch (e) { fail(e) }
   }
 
@@ -124,13 +125,13 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   }
 
   async function changeNeed(l: PickOrderLine) {
-    const v = window.prompt(`Số cần của ${l.sku}`, fmtQty(l.qty_need))
+    const v = await promptNumber(`Số cần của ${l.sku}`, fmtQty(l.qty_need))
     if (v === null) return
     try { await setLineNeed(l.id, Number(v.replace(',', '.'))); lines.reload() } catch (e) { fail(e) }
   }
 
   async function removeLine(l: PickOrderLine) {
-    if (!window.confirm(`Bỏ dòng ${l.sku} khỏi đơn?`)) return
+    if (!(await confirmDialog(`Bỏ dòng ${l.sku} khỏi đơn?`, { danger: true }))) return
     try { await deleteLine(l.id); lines.reload() } catch (e) { fail(e) }
   }
 
@@ -210,7 +211,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
               )}
               {pr.extra > 0 && <Notice kind="warn">Lấy dư {fmtQty(pr.extra)} {l.uom}.</Notice>}
               <div className="h-3 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuenow={pr.pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Tiến độ ${l.sku}`}>
-                <div className={`h-full ${pr.extra > 0 ? 'bg-amber-500' : 'bg-teal-600'}`} style={{ width: `${pr.pct}%` }} />
+                <div className={`h-full ${pr.extra > 0 ? 'bg-amber-500' : 'bg-brand-600'}`} style={{ width: `${pr.pct}%` }} />
               </div>
               <div className="flex gap-2">
                 <Button kind="primary" className="flex-1" onClick={() => openPick(l)}>Lấy hàng</Button>
@@ -243,7 +244,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
         ))}
       </div>
 
-      <Button kind="danger" onClick={removeOrder}>Xoá đơn picking</Button>
+      <Button kind="danger" onClick={removeOrder}>Xoá lệnh lấy hàng</Button>
 
       {form && o && (
         <PickForm

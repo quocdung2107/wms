@@ -3,6 +3,7 @@ import { dbReady } from '../../shared/db/client.ts'
 import { deleteSource, listSources, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Card, Notice, useLoad } from '../../shared/ui/ui.tsx'
 import ImportWizard from './ImportWizard.tsx'
+import { confirmDialog } from '../../shared/ui/Dialog'
 
 export default function DataPage() {
   const sources = useLoad(listSources, [])
@@ -78,7 +79,7 @@ export default function DataPage() {
               <Button
                 kind="danger"
                 onClick={async () => {
-                  if (confirm(`Xoá nguồn "${s.name}" và toàn bộ dữ liệu của nó?`)) {
+                  if (await confirmDialog(`Xoá nguồn "${s.name}" và toàn bộ dữ liệu của nó?`, { danger: true })) {
                     await deleteSource(s.id)
                     sources.reload()
                   }

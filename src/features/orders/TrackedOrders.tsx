@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useLoad } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { sb } from './api'
 import { AttentionBadge, StatusBadge } from './status'
 import type { GroupCtx, Order } from './types'
@@ -26,7 +27,7 @@ export function TrackedOrders({ ctx, selectedId, onSelect }: { ctx: GroupCtx; se
   return (
     <details open className="rounded-xl bg-white shadow-sm">
       <summary className="min-h-11 cursor-pointer px-3 py-2.5 text-base font-semibold">
-        Đơn đang theo dõi ({list.length}){n > 0 && <span className="ml-2 text-red-800">⚠️ {n} cần chú ý</span>}
+        Đơn đang theo dõi ({list.length}){n > 0 && <span className="ml-2 inline-flex items-center gap-1 text-red-800"><Icon name="alert" size={14} /> {n} cần chú ý</span>}
       </summary>
       {orders.data && list.length === 0 && <p className="px-3 pb-3 text-slate-600">Không có đơn đang mở.</p>}
       <ul className="max-h-48 space-y-1 overflow-y-auto px-2 pb-2">
@@ -35,7 +36,7 @@ export function TrackedOrders({ ctx, selectedId, onSelect }: { ctx: GroupCtx; se
             <button
               onClick={() => onSelect(o.id)}
               aria-pressed={selectedId === o.id}
-              className={`flex min-h-11 w-full flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-slate-50 ${selectedId === o.id ? 'ring-2 ring-teal-600' : ''} ${o.needs_attention ? 'border-l-4 border-red-500' : ''}`}
+              className={`flex min-h-11 w-full flex-wrap items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-slate-50 ${selectedId === o.id ? 'ring-2 ring-brand-600' : ''} ${o.needs_attention ? 'border-l-4 border-red-500' : ''}`}
             >
               <span className="font-mono text-sm text-slate-700">{o.code}</span>
               <StatusBadge code={o.status} />

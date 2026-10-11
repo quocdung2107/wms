@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { PickOrder } from '../pick-orders/api'
 import { Button, Card, inputClass } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { errText, pushOrderCard, sb } from './api'
 import { ago, fmtDay } from './format'
 import { AttentionBadge, StatusBadge } from './status'
@@ -15,7 +16,7 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-sm text-slate-600">{order.code}</span>
           <StatusBadge code={order.status} />
-          {order.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
+          {order.priority === 'URGENT' && <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white"><Icon name="flame" size={14} /> Gấp</span>}
           <AttentionBadge reason={order.attention_reason} />
         </div>
         <h2 className="text-xl font-bold">{order.goods}</h2>
@@ -49,7 +50,7 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
             <div>
               Liên hệ: <b>{order.contact_name}</b>{' '}
               {order.contact_phone && (
-                <a className="text-teal-800 underline" href={`tel:${order.contact_phone}`}>
+                <a className="text-brand-800 underline" href={`tel:${order.contact_phone}`}>
                   {order.contact_phone}
                 </a>
               )}
@@ -68,7 +69,7 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
                 }
               }}
             >
-              💬 Gửi đơn vào chat
+              <Icon name="chat" /> Gửi đơn vào chat
             </Button>
             {shared && <span className="text-sm text-slate-700">{shared}</span>}
             <Button
@@ -77,7 +78,7 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
                 try {
                   const [api, sum] = await Promise.all([import('../pick-orders/api'), import('../pick-orders/summary')])
                   const list = sum.matchPickOrders(await api.listPickOrders(), order.code)
-                  if (list.length === 0) return setPkMsg(`Máy này chưa có đơn picking nào gắn mã ${order.code}.`)
+                  if (list.length === 0) return setPkMsg(`Máy này chưa có lệnh lấy hàng nào gắn mã ${order.code}.`)
                   if (list.length > 1 && !pk) return setPk({ list, sel: list[0].id })
                   const chosen = list.find((p) => p.id === pk?.sel) ?? list[0]
                   const [lines, picks] = await Promise.all([api.listLines(chosen.id), api.listOrderPicks(chosen.id)])
@@ -86,11 +87,11 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
                   setPk(null)
                   setPkMsg(error ? errText(error) : `Đã gửi tổng hợp ${chosen.code} vào chat đơn.`)
                 } catch {
-                  setPkMsg('Không đọc được dữ liệu picking trên máy này.')
+                  setPkMsg('Không đọc được dữ liệu lệnh lấy hàng trên máy này.')
                 }
               }}
             >
-              📋 Gửi tổng hợp picking
+              <Icon name="clipboard" /> Gửi tổng hợp lệnh lấy hàng
             </Button>
             {pk && (
               <select className={inputClass} value={pk.sel} onChange={(e) => setPk({ ...pk, sel: Number(e.target.value) })}>

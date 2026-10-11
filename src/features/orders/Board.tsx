@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { sb } from './api'
 import { ago, fmtDay } from './format'
 import { OrderDetail } from './OrderDetail'
@@ -39,12 +40,12 @@ export function Board({ ctx }: { ctx: GroupCtx }) {
   else if (assignee !== 'all') shown = shown.filter((o) => o.assignee_id === assignee)
   if (!history) shown = [...shown].sort((a, b) => Number(b.needs_attention) - Number(a.needs_attention))
 
-  const chip = (key: string, label: string, n: number, extra = '') => (
+  const chip = (key: string, label: ReactNode, n: number, extra = '') => (
     <button
       key={key}
       onClick={() => setStatus(status === key ? 'all' : key)}
       aria-pressed={status === key}
-      className={`min-h-11 rounded-lg border px-3 text-base ${status === key ? 'border-teal-700 bg-teal-50 font-semibold' : 'border-slate-300 bg-white'} ${extra}`}
+      className={`min-h-11 rounded-lg border px-3 text-base ${status === key ? 'border-brand-600 bg-brand-50 font-semibold' : 'border-slate-300 bg-white'} ${extra}`}
     >
       {label} <b>{n}</b>
     </button>
@@ -64,8 +65,8 @@ export function Board({ ctx }: { ctx: GroupCtx }) {
 
         {!history && (
           <div className="flex flex-wrap gap-2">
-            {attention > 0 && chip('ATTENTION', '⚠️ Cần chú ý', attention, 'text-red-800')}
-            {STATUSES.filter((s) => s.code !== 'COMPLETED').map((s) => chip(s.code, `${s.icon} ${s.label}`, counts(s.code)))}
+            {attention > 0 && chip('ATTENTION', <><Icon name="alert" size={14} /> Cần chú ý</>, attention, 'text-red-800')}
+            {STATUSES.filter((s) => s.code !== 'COMPLETED').map((s) => chip(s.code, <><Icon name={s.icon} size={14} /> {s.label}</>, counts(s.code)))}
           </div>
         )}
 
@@ -89,12 +90,12 @@ export function Board({ ctx }: { ctx: GroupCtx }) {
             <li key={o.id}>
               <button
                 onClick={() => setOpenId(o.id)}
-                className={`w-full space-y-1 rounded-xl bg-white p-3 text-left shadow-sm hover:bg-slate-50 ${openId === o.id ? 'ring-2 ring-teal-600' : ''} ${o.needs_attention ? 'border-l-4 border-red-500' : ''}`}
+                className={`w-full space-y-1 rounded-xl bg-white p-3 text-left shadow-sm hover:bg-slate-50 ${openId === o.id ? 'ring-2 ring-brand-600' : ''} ${o.needs_attention ? 'border-l-4 border-red-500' : ''}`}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-sm text-slate-600">{o.code}</span>
                   <StatusBadge code={o.status} />
-                  {o.priority === 'URGENT' && <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white">🔥 Gấp</span>}
+                  {o.priority === 'URGENT' && <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-0.5 text-sm font-medium text-white"><Icon name="flame" size={14} /> Gấp</span>}
                   <AttentionBadge reason={o.attention_reason} />
                 </div>
                 <div className="font-semibold">{o.goods}</div>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Notice, useLoad } from '../../shared/ui/ui'
+import { Icon } from '../../shared/ui/icons'
 import { Board } from './Board'
 import { NewOrderForm } from './NewOrderForm'
 import { OrderDetail } from './OrderDetail'
@@ -12,10 +13,10 @@ import type { GroupCtx, Member } from './types'
 import { Card } from '../../shared/ui/ui'
 
 const VIEWS = [
-  { id: 'chat', label: '💬 Chat' },
-  { id: 'new', label: '➕ Tạo đơn' },
-  { id: 'orders', label: '📦 Đơn hàng' },
-  { id: 'members', label: '👥 Thành viên' },
+  { id: 'chat', icon: 'chat', label: 'Chat' },
+  { id: 'new', icon: 'plus', label: 'Tạo đơn' },
+  { id: 'orders', icon: 'box', label: 'Đơn' },
+  { id: 'members', icon: 'users', label: 'Thành viên' },
 ] as const
 
 async function loadMembers(groupId: string): Promise<Member[]> {
@@ -64,8 +65,9 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
               setOpenId(null)
               setPanelId(null)
             }}
-            className={`min-h-11 rounded-lg border px-4 text-base ${view === v.id ? 'border-teal-700 bg-teal-50 font-semibold' : 'border-slate-300 bg-white'}`}
+            className={`min-h-11 rounded-lg border px-4 text-base ${view === v.id ? 'border-brand-600 bg-brand-50 font-semibold' : 'border-slate-300 bg-white'}`}
           >
+            <Icon name={v.icon} className="mr-1.5 align-text-bottom" />
             {v.label}
           </button>
         ))}
