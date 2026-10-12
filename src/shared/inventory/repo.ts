@@ -1,7 +1,9 @@
 import { batch, dbReady, query } from '../db/client.ts'
 import { STD_FIELDS, type StdField, type StdRow } from '../excel/reader.ts'
 import type { InvRow } from './sheet.ts'
+import type { WeightRow } from './weight.ts'
 import { DEFAULT_UOM } from './uom.ts'
+import { CUSTOMER_FIELDS, customerKey, normalizeCustomer, validateCustomer, type Customer } from './customers.ts'
 import { pickOrdersUpgradeSql, picksUpgradeSql } from '../../features/pick-orders/logic.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
@@ -54,6 +56,10 @@ export function initSchema() {
       { sql: 'CREATE INDEX IF NOT EXISTS idx_pol_order ON pick_order_lines(pick_order_id)' },
       { sql: 'CREATE TABLE IF NOT EXISTS pick_counter (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL)' },
       { sql: 'INSERT OR IGNORE INTO pick_counter (id, n) VALUES (1, 0)' },
+      // Khối lượng kg/ĐVT theo SKU. Bảng riêng: nạp lại tồn kho không đụng tới.
+      { sql: 'CREATE TABLE IF NOT EXISTS sku_weight (sku_key TEXT PRIMARY KEY, sku TEXT NOT NULL, weight_kg REAL NOT NULL)' },
+      // Khách hàng. pick_orders.customer_code chỉ là chữ thường, không khoá ngoại (xoá khách không ảnh hưởng PK).
+      { sql: 'CREATE TABLE IF NOT EXISTS customers (code_key TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, short_name TEXT, address TEXT, delivery_address TEXT, contact TEXT, sup TEXT, phone1 TEXT, phone2 TEXT, note TEXT)' },
     ])
     // DB cũ: picks chưa có cột pick_order_id -> thêm (không mất dữ liệu cũ).
     const cols = (await query('PRAGMA table_info(picks)')).map((c) => String(c.name))
@@ -111,6 +117,22 @@ export async function replaceRows(sourceId: number, rows: StdRow[], meta: { file
       bind: [meta.file_name, meta.skipped, rows.length, sourceId],
     },
   ])
+}
+
+/** Nạp file khối lượng: thay hoàn toàn bảng cũ. */
+export async function replaceSkuWeights(rows: WeightRow[]) {
+  await initSchema()
+  await batch([
+    { sql: 'DELETE FROM sku_weight' },
+    ...rows.map((r) => ({ sql: 'INSERT OR REPLACE INTO sku_weight (sku_key, sku, weight_kg) VALUES (?, ?, ?)', bind: [r.key, r.sku, r.weight_kg] })),
+  ])
+}
+
+/** Map sku_key (weightKey) -> kg. */
+export async function getSkuWeights(): Promise<Map<string, number>> {
+  await initSchema()
+  const rows = await query('SELECT sku_key, weight_kg FROM sku_weight')
+  return new Map(rows.map((r) => [r.sku_key as string, r.weight_kg as number]))
 }
 
 export async function deleteSource(id: number) {
@@ -175,4 +197,39 @@ export async function deleteUom(key: string) {
 export async function distinctUomRaw(): Promise<string[]> {
   await initSchema()
   return (await query(`SELECT DISTINCT uom_raw FROM inventory_rows WHERE uom_raw <> ''`)).map((r) => r.uom_raw as string)
+}
+
+const toCustomer = (r: Record<string, unknown>): Customer => normalizeCustomer(r as Partial<Customer>)
+
+export async function listCustomers(): Promise<Customer[]> {
+  await initSchema()
+  return (await query('SELECT * FROM customers ORDER BY name COLLATE NOCASE, code')).map(toCustomer)
+}
+
+/** Thêm khách mới. Trả thông báo lỗi (trùng mã, thiếu trường) hoặc null nếu thành công. */
+export async function addCustomer(input: Partial<Customer>): Promise<string | null> {
+  await initSchema()
+  const c = normalizeCustomer(input)
+  const existing = (await query('SELECT code FROM customers')).map((r) => String(r.code))
+  const err = validateCustomer(c, existing)
+  if (err) return err
+  await batch([{ sql: `INSERT INTO customers (code_key, ${CUSTOMER_FIELDS.join(', ')}) VALUES (?, ${CUSTOMER_FIELDS.map(() => '?').join(', ')})`, bind: [customerKey(c.code), ...CUSTOMER_FIELDS.map((f) => c[f])] }])
+  return null
+}
+
+/** Sửa khách (giữ nguyên mã). Trả lỗi hoặc null. */
+export async function updateCustomer(code: string, input: Partial<Customer>): Promise<string | null> {
+  await initSchema()
+  const c = normalizeCustomer({ ...input, code })
+  const err = validateCustomer(c, [])
+  if (err) return err
+  const sets = CUSTOMER_FIELDS.filter((f) => f !== 'code')
+  await batch([{ sql: `UPDATE customers SET ${sets.map((f) => `${f} = ?`).join(', ')} WHERE code_key = ?`, bind: [...sets.map((f) => c[f]), customerKey(code)] }])
+  return null
+}
+
+/** Xoá khách; PK đang dùng mã này giữ nguyên mã chữ. */
+export async function deleteCustomer(code: string) {
+  await initSchema()
+  await batch([{ sql: 'DELETE FROM customers WHERE code_key = ?', bind: [customerKey(code)] }])
 }
