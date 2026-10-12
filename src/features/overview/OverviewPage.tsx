@@ -52,7 +52,7 @@ export default function OverviewPage() {
     <div className="grid gap-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="Phiếu kiểm đã lưu" value={local.loading ? '…' : (local.data?.counts ?? '–')} href="#/kiem-kho" />
-        <Stat label="Đơn PK còn dở" value={local.loading ? '…' : (local.data?.picks ?? '–')} href="#/don-picking" />
+        <Stat label="Lệnh lấy hàng còn dở" value={local.loading ? '…' : (local.data?.picks ?? '–')} href="#/don-picking" />
         {signedIn && !att.error && (
           <Stat label="Đơn cần chú ý" value={att.loading ? '…' : (att.data ?? '–')} />
         )}
