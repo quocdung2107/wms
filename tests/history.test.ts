@@ -74,6 +74,21 @@ test('buildPickExport: có info -> 3 cột cuối', () => {
   assert.equal(rows[1][2], "'=d")
 })
 
+test('buildPickExport: có KL -> 2 cột + dòng tổng, SKU thiếu KL để trống', () => {
+  const mk = (id: number, sku: string, qty: number): Pick => ({
+    id, sku, description: '', source: 'A', location: 'L', batch_no: '', uom: '', qty,
+    order_no: null, picked_at: '2026-10-05 10:00:00', note: '',
+  })
+  const rows = buildPickExport([mk(1, 'a 1', 4), mk(2, 'B2', 3)], undefined, new Map([['A1', 2.5]]))
+  assert.equal(rows.length, 4)
+  assert.deepEqual(rows[0].slice(13), ['KL đơn vị (kg)', 'KL dòng (kg)'])
+  assert.deepEqual(rows[1].slice(13), [2.5, 10])
+  assert.deepEqual(rows[2].slice(13), ['', ''])
+  assert.equal(rows[3][0], 'Tổng khối lượng')
+  assert.equal(rows[3][rows[3].length - 1], 10)
+  assert.equal(buildPickExport([mk(1, 'S', 1)])[0].length, 13)
+})
+
 test('skuStockInfo: nhiều nguồn/vị trí, lẻ cũng hold, trước loaded_at, không tồn, tồn âm', () => {
   const la = { A: '2026-10-05 09:00:00', B: '2026-10-05 09:00:00' }
   const m = skuStockInfo(

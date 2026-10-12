@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildPickSummary, matchPickOrders, SUMMARY_MAX } from '../src/features/pick-orders/summary.ts'
+import { buildPickSummary, matchPickOrders, pickWeightText, sumPickWeight, SUMMARY_MAX } from '../src/features/pick-orders/summary.ts'
 
 const lines = [
   { sku: 'A1', description: '', uom: 'Thùng', qty_need: 10 },
@@ -41,4 +41,14 @@ test('matchPickOrders so khớp mã Order không phân biệt hoa/thường, kho
   assert.equal(matchPickOrders(list, ' dh-0001 ').length, 1)
   assert.equal(matchPickOrders(list, 'DH-9').length, 0)
   assert.equal(matchPickOrders(list, '').length, 0)
+})
+
+test('sumPickWeight cộng KL đã lấy, SKU thiếu KL đếm missing; pickWeightText', () => {
+  const w = new Map([['A1', 2]])
+  const r = sumPickWeight([{ lines, picks: base.picks }], w)
+  assert.equal(r.totalKg, 8)
+  assert.equal(r.missing, 2)
+  assert.equal(pickWeightText(8, 2), '8 kg (chưa có KL cho 2 SKU)')
+  assert.equal(pickWeightText(0, 3), null)
+  assert.match(buildPickSummary({ ...base, weightText: pickWeightText(8, 0) }), /Khối lượng: 8 kg/)
 })

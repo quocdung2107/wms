@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
 import { readWorkbook } from '../src/shared/excel/reader.ts'
 import {
-  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql, pickOrdersUpgradeSql, planAttach,
+  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql, weighLines, pickOrdersUpgradeSql, planAttach,
 } from '../src/features/pick-orders/logic.ts'
 
 test('formatPkCode: PK-0001, tăng dần, quá 4 chữ số vẫn đúng', () => {
@@ -78,7 +78,24 @@ test('picksUpgradeSql: DB cũ chưa có cột -> ALTER; đã có -> không ALTER
 
 test('pickOrdersUpgradeSql: thiếu cột -> ALTER, đủ -> rỗng', () => {
   assert.ok(pickOrdersUpgradeSql(['id', 'code']).some((q) => q.includes('ADD COLUMN allow_sku_tag')))
-  assert.deepEqual(pickOrdersUpgradeSql(['id', 'allow_sku_tag']), [])
+  assert.deepEqual(pickOrdersUpgradeSql(['id', 'allow_sku_tag', 'customer_code']), [])
+  const only = pickOrdersUpgradeSql(['id', 'allow_sku_tag'])
+  assert.equal(only.length, 1)
+  assert.ok(only[0].includes('ADD COLUMN customer_code'))
+  assert.equal(pickOrdersUpgradeSql(['id']).length, 2)
+})
+
+test('weighLines: SKU thiếu KL là null, không tính vào tổng, đếm missing', () => {
+  const w = new Map([['A1', 2.5]])
+  const r = weighLines([{ sku: 'a 1', qty: 4 }, { sku: 'B2', qty: 3 }, { sku: 'A1', qty: 0 }], w)
+  assert.equal(r.rows[0].unitKg, 2.5)
+  assert.equal(r.rows[0].lineKg, 10)
+  assert.equal(r.rows[1].unitKg, null)
+  assert.equal(r.rows[1].lineKg, null)
+  assert.equal(r.rows[2].lineKg, 0)
+  assert.equal(r.totalKg, 10)
+  assert.equal(r.missing, 1)
+  assert.equal(weighLines([{ sku: 'X', qty: 1 }], new Map()).totalKg, 0)
 })
 
 test('planAttach: 3 trường hợp', () => {

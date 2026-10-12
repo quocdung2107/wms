@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
+import { listCustomers } from '../../shared/inventory/repo.ts'
+import { customerLabel } from '../../shared/inventory/customers.ts'
 import { createPickOrder, listPickOrders } from './api.ts'
 import PickOrderDetail from './PickOrderDetail.tsx'
 
 export default function PickOrdersPage() {
   const orders = useLoad(listPickOrders, [])
+  const customers = useLoad(listCustomers, [])
   const [openId, setOpenId] = useState<number | null>(null)
   const [name, setName] = useState('')
   const [ref, setRef] = useState('')
@@ -43,6 +46,7 @@ export default function PickOrdersPage() {
         {(orders.data ?? []).map((o) => (
           <Card key={o.id} className="space-y-1">
             <p className="text-lg font-bold">{o.code}{o.order_ref ? <span className="text-base font-normal"> · {o.order_ref}</span> : null}</p>
+            {o.customer_code && <p className="text-slate-700">Khách: {customerLabel(o.customer_code, customers.data ?? [])}</p>}
             {o.name && <p className="text-slate-700">{o.name}</p>}
             <p className="text-sm text-slate-500">{o.created_at}</p>
             <Button className="w-full" onClick={() => setOpenId(o.id)}>Mở</Button>

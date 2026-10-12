@@ -13,6 +13,8 @@ export type Order = {
   contact_phone: string
   customer_name: string
   customer_address: string
+  /** Mã KH (migration 20261010000000); undefined khi DB chưa áp dụng. */
+  customer_code?: string
   shipment_code: string | null
   priority: 'NORMAL' | 'URGENT'
   status: string

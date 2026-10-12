@@ -35,6 +35,11 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
             Giao hàng: <b>{fmtDay(order.delivery_at)}</b>
             {order.delivery_address && ` · ${order.delivery_address}`}
           </div>
+          {order.customer_code && (
+            <div>
+              Mã khách: <b className="font-mono">{order.customer_code}</b>
+            </div>
+          )}
           {order.customer_name && (
             <div>
               Người đặt hàng: <b>{order.customer_name}</b>
@@ -82,7 +87,13 @@ export function OrderSummary({ ctx, order, orderId }: { ctx: GroupCtx; order: Or
                   if (list.length > 1 && !pk) return setPk({ list, sel: list[0].id })
                   const chosen = list.find((p) => p.id === pk?.sel) ?? list[0]
                   const [lines, picks] = await Promise.all([api.listLines(chosen.id), api.listOrderPicks(chosen.id)])
-                  const body = sum.buildPickSummary({ pickCode: chosen.code, orderCode: order.code, customerName: order.customer_name, customerAddress: order.customer_address, shipmentCode: order.shipment_code, lines, picks })
+                  let weightText: string | null = null
+                  try {
+                    const { getSkuWeights } = await import('../../shared/inventory/repo')
+                    const r = sum.sumPickWeight([{ lines, picks }], await getSkuWeights())
+                    weightText = sum.pickWeightText(r.totalKg, r.missing)
+                  } catch { /* không có KL: bỏ dòng Khối lượng */ }
+                  const body = sum.buildPickSummary({ pickCode: chosen.code, orderCode: order.code, customerName: order.customer_name, customerAddress: order.customer_address, shipmentCode: order.shipment_code, lines, picks, weightText })
                   const { error } = await sb().from('messages').insert({ group_id: ctx.groupId, order_id: orderId, sender_id: ctx.me, body })
                   setPk(null)
                   setPkMsg(error ? errText(error) : `Đã gửi tổng hợp ${chosen.code} vào chat đơn.`)

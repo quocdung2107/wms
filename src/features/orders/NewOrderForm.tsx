@@ -1,18 +1,63 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui'
 import { Icon } from '../../shared/ui/icons'
 import { errText, pushOrderCard, rpc } from './api'
 import { localToIso } from './format'
 import type { GroupCtx } from './types'
 import { noticeDialog } from '../../shared/ui/Dialog'
+import type { Customer } from '../../shared/inventory/customers'
+
+/** Ô chọn khách: danh sách từ SQLite cục bộ; máy không có danh sách thì nhập tay mã. Không bao giờ ném lỗi. */
+export function CustomerPicker({ value, onChange }: { value: string; onChange: (code: string, c?: Customer) => void }) {
+  const [list, setList] = useState<Customer[]>([])
+  useEffect(() => {
+    let alive = true
+    import('../../shared/inventory/repo').then((r) => r.listCustomers()).then((l) => alive && setList(l), () => {})
+    return () => { alive = false }
+  }, [])
+  const known = list.some((c) => c.code.trim().toUpperCase() === value.trim().toUpperCase())
+  return (
+    <Field label="Khách hàng (mã KH, có thể để trống)">
+      {list.length > 0 ? (
+        <select className={inputClass} value={value} onChange={(e) => onChange(e.target.value, list.find((c) => c.code === e.target.value))}>
+          <option value="">— Chưa chọn —</option>
+          {value && !known && <option value={value}>{value}</option>}
+          {list.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+        </select>
+      ) : (
+        <input className={inputClass} maxLength={50} placeholder="Nhập mã khách (máy này chưa có danh sách)" value={value} onChange={(e) => onChange(e.target.value)} />
+      )}
+    </Field>
+  )
+}
 
 export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id: string) => void }) {
-  const [f, setF] = useState({ code: '', goods: '', weight: '', packages: '', pickupAt: '', deliveryAt: '', pickupAddr: '', deliveryAddr: '', contact: '', phone: '', customer: '', customerAddr: '', urgent: false })
+  const [f, setF] = useState({ code: '', goods: '', weight: '', packages: '', pickupAt: '', deliveryAt: '', pickupAddr: '', deliveryAddr: '', contact: '', phone: '', customer: '', customerAddr: '', customerCode: '', urgent: false })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [wMsg, setWMsg] = useState('')
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }))
 
   const ready = f.goods.trim() && Number(f.weight) > 0 && Number(f.packages) > 0 && f.pickupAt && f.deliveryAt
+
+  async function fillWeight() {
+    setWMsg('')
+    const ref = f.code.trim()
+    if (!ref) return setWMsg('Nhập mã đơn (DH-xxxx) trước để tìm lệnh lấy hàng.')
+    try {
+      const [api, sum, repo] = await Promise.all([import('../pick-orders/api'), import('../pick-orders/summary'), import('../../shared/inventory/repo')])
+      const list = sum.matchPickOrders(await api.listPickOrders(), ref)
+      if (list.length === 0) return setWMsg(`Máy này chưa có lệnh lấy hàng nào gắn mã ${ref}.`)
+      const weights = await repo.getSkuWeights()
+      const groups = await Promise.all(list.map(async (p) => ({ lines: await api.listLines(p.id), picks: await api.listOrderPicks(p.id) })))
+      const { totalKg, missing } = sum.sumPickWeight(groups, weights)
+      if (!(totalKg > 0)) return setWMsg(`Chưa tính được khối lượng từ ${list.length} lệnh lấy hàng (chưa lấy hàng hoặc thiếu KL SKU).`)
+      setF((x) => ({ ...x, weight: String(Math.round(totalKg * 100) / 100) }))
+      setWMsg(`Đã điền từ ${list.length} lệnh lấy hàng${missing > 0 ? `; ${missing} SKU chưa có KL nên chưa tính` : ''}. Có thể sửa tay.`)
+    } catch {
+      setWMsg('Không đọc được dữ liệu lệnh lấy hàng trên máy này.')
+    }
+  }
 
   async function create() {
     if (f.deliveryAt < f.pickupAt) {
@@ -37,6 +82,8 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
         p_priority: f.urgent ? 'URGENT' : 'NORMAL',
         p_customer_name: f.customer,
         p_customer_address: f.customerAddr,
+        // Chỉ gửi khi có mã: tương thích RPC cũ (chưa có p_customer_code).
+        ...(f.customerCode.trim() ? { p_customer_code: f.customerCode.trim() } : {}),
       })) as string
       try {
         await pushOrderCard(ctx, { id, code: f.code || id, goods: f.goods })
@@ -68,6 +115,10 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
           <Field label="Tải trọng (kg) *">
             <input className={inputClass} required type="number" inputMode="decimal" min="0.01" step="0.01" value={f.weight} onChange={set('weight')} />
           </Field>
+          <div className="space-y-1 sm:col-span-2">
+            <Button onClick={() => void fillWeight()}>Lấy KL từ lệnh lấy hàng</Button>
+            {wMsg && <p className="text-sm text-slate-700">{wMsg}</p>}
+          </div>
           <Field label="Số kiện *">
             <input className={inputClass} required type="number" inputMode="numeric" min="1" step="1" value={f.packages} onChange={set('packages')} />
           </Field>
@@ -77,6 +128,12 @@ export function NewOrderForm({ ctx, onCreated }: { ctx: GroupCtx; onCreated: (id
           <Field label="Thời gian giao hàng *">
             <input className={inputClass} required type="datetime-local" min={f.pickupAt} value={f.deliveryAt} onChange={set('deliveryAt')} />
           </Field>
+          <div className="sm:col-span-2">
+            <CustomerPicker
+              value={f.customerCode}
+              onChange={(code, c) => setF((x) => ({ ...x, customerCode: code, customer: c && !x.customer ? c.name : x.customer, customerAddr: c && !x.customerAddr ? c.address : x.customerAddr }))}
+            />
+          </div>
           <Field label="Người đặt hàng">
             <input className={inputClass} maxLength={100} value={f.customer} onChange={set('customer')} />
           </Field>

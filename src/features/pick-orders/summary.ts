@@ -1,5 +1,5 @@
 // Dựng nội dung tin "tổng hợp picking" gửi vào chat Order. Hàm thuần (test được dưới node).
-import { normOrderRef, pickedBySku, type PickLine } from './logic.ts'
+import { fmtKg, normOrderRef, pickedBySku, weighLines, type PickLine } from './logic.ts'
 
 export const SUMMARY_MAX = 2000
 
@@ -11,7 +11,7 @@ export interface PickSummaryInput {
   shipmentCode?: string | null
   lines: PickLine[]
   picks: { sku: string; qty: number }[]
-  /** Chừa chỗ: khi có giá trị sẽ hiện dòng "Khối lượng". Hiện chưa ai truyền. */
+  /** Khi có giá trị sẽ hiện dòng "Khối lượng" (xem pickWeightText). */
   weightText?: string | null
 }
 
@@ -35,6 +35,31 @@ export function totalsByUom(lines: PickLine[], picked: Map<string, number>): { u
     m.set(uom, cur)
   }
   return [...m.values()]
+}
+
+/**
+ * Tổng KL đã lấy của một hoặc nhiều PK (SL đã lấy x kg/ĐVT). SKU thiếu KL không cộng, đếm vào `missing`.
+ * `weights`: Map weightKey -> kg (getSkuWeights).
+ */
+export function sumPickWeight(
+  groups: { lines: { sku: string }[]; picks: { sku: string; qty: number }[] }[],
+  weights: Map<string, number>,
+): { totalKg: number; missing: number } {
+  let totalKg = 0
+  let missing = 0
+  for (const g of groups) {
+    const picked = pickedBySku(g.picks)
+    const w = weighLines(g.lines.map((l) => ({ sku: l.sku, qty: picked.get(l.sku.trim().toUpperCase()) ?? 0 })), weights)
+    totalKg += w.totalKg
+    missing += w.missing
+  }
+  return { totalKg, missing }
+}
+
+/** Chuỗi cho dòng "Khối lượng" của tin tổng hợp; null khi tổng <= 0. */
+export function pickWeightText(totalKg: number, missing: number): string | null {
+  if (!(totalKg > 0)) return null
+  return `${fmtKg(totalKg)} kg${missing > 0 ? ` (chưa có KL cho ${missing} SKU)` : ''}`
 }
 
 export function buildPickSummary(inp: PickSummaryInput): string {

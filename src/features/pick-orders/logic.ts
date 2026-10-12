@@ -1,4 +1,5 @@
 // Logic thuần của đơn picking (không import client/worker để test được dưới node).
+import { weightKey } from '../../shared/inventory/weight.ts'
 import { asNumber, asText, buildColumns, detectHeader, normKey, type Cell, type SheetData } from '../../shared/excel/reader.ts'
 
 export interface PickLine { sku: string; description: string; uom: string; qty_need: number }
@@ -105,10 +106,37 @@ export function picksUpgradeSql(columns: string[]): string[] {
   return out
 }
 
-/** Cột allow_sku_tag cho pick_orders có sẵn: chỉ ALTER khi thiếu (columns từ PRAGMA table_info(pick_orders)). */
+/** Cột bổ sung cho pick_orders có sẵn: chỉ ALTER khi thiếu (columns từ PRAGMA table_info(pick_orders)). */
 export function pickOrdersUpgradeSql(columns: string[]): string[] {
-  return columns.includes('allow_sku_tag') ? [] : ['ALTER TABLE pick_orders ADD COLUMN allow_sku_tag INTEGER NOT NULL DEFAULT 0']
+  const out: string[] = []
+  if (!columns.includes('allow_sku_tag')) out.push('ALTER TABLE pick_orders ADD COLUMN allow_sku_tag INTEGER NOT NULL DEFAULT 0')
+  if (!columns.includes('customer_code')) out.push('ALTER TABLE pick_orders ADD COLUMN customer_code TEXT')
+  return out
 }
+
+// ---------- khối lượng ----------
+
+export interface WeighedLine { sku: string; qty: number; unitKg: number | null; lineKg: number | null }
+
+/**
+ * KL từng dòng (= SL x kg/ĐVT) và tổng. SKU không có KL -> unitKg/lineKg = null (không thành 0),
+ * không cộng vào tổng, đếm vào `missing`. `weights`: Map weightKey -> kg.
+ */
+export function weighLines(lines: { sku: string; qty: number }[], weights: Map<string, number>) {
+  let totalKg = 0
+  let missing = 0
+  const rows: WeighedLine[] = lines.map((l) => {
+    const kg = weights.get(weightKey(l.sku))
+    if (kg === undefined || !(kg > 0)) { missing++; return { sku: l.sku, qty: l.qty, unitKg: null, lineKg: null } }
+    const lineKg = l.qty * kg
+    totalKg += lineKg
+    return { sku: l.sku, qty: l.qty, unitKg: kg, lineKg }
+  })
+  return { rows, totalKg, missing }
+}
+
+/** Làm tròn hiển thị KL (tối đa 3 số lẻ). */
+export const fmtKg = (n: number) => String(Math.round(n * 1000) / 1000)
 
 export type AttachPlan = { ok: true; addLine: PickLine | null } | { ok: false; error: string }
 

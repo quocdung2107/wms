@@ -12,6 +12,7 @@ export interface PickOrder {
   order_ref: string | null
   created_at: string
   allow_sku_tag: boolean
+  customer_code: string | null
 }
 export interface PickOrderLine extends PickLine { id: number }
 
@@ -20,6 +21,7 @@ const toOrder = (r: Record<string, unknown>): PickOrder => ({
   id: r.id as number, code: str(r.code), name: str(r.name), status: str(r.status) || 'open',
   order_ref: r.order_ref == null ? null : String(r.order_ref), created_at: str(r.created_at),
   allow_sku_tag: Number(r.allow_sku_tag) === 1,
+  customer_code: r.customer_code == null || String(r.customer_code).trim() === '' ? null : String(r.customer_code),
 })
 
 export async function listPickOrders(): Promise<PickOrder[]> {
@@ -52,6 +54,12 @@ export async function createPickOrder(input: { name: string; order_ref?: string 
 export async function setOrderRef(id: number, ref: string): Promise<void> {
   await initSchema()
   await query('UPDATE pick_orders SET order_ref = ? WHERE id = ?', [normOrderRef(ref), id])
+}
+
+/** Gắn/đổi khách của PK (rỗng = bỏ gắn). Chỉ lưu mã chữ, không khoá ngoại. */
+export async function setCustomerCode(id: number, code: string): Promise<void> {
+  await initSchema()
+  await query('UPDATE pick_orders SET customer_code = ? WHERE id = ?', [code.trim() === '' ? null : code.trim(), id])
 }
 
 export async function renamePickOrder(id: number, name: string): Promise<void> {

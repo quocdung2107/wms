@@ -141,17 +141,35 @@ export function buildCountExport(sessions: CountSession[], lines: Record<number,
   ]
 }
 
-export function buildPickExport(picks: Pick[], info?: Map<string, SkuStockInfo>): Cell[][] {
-  return [
-    PICK_EXPORT_HEADER,
-    ...picks.map((p) => {
-      const i = info?.get(skuKey(p.sku))
-      return safeRow([
-        p.picked_at, p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no ?? '', p.note,
-        i ? i.total : '', i ? i.estimate : '', i ? i.hold : '',
-      ])
-    }),
-  ]
+/** Cột KL thêm vào cuối khi truyền `weights`. */
+export const PICK_EXPORT_WEIGHT_HEADER = ['KL đơn vị (kg)', 'KL dòng (kg)']
+
+/**
+ * `weights` (tuỳ chọn): Map khoá SKU (bỏ khoảng trắng, hoa thường) -> kg/ĐVT. Có thì thêm 2 cột KL
+ * và dòng tổng cuối bảng; SKU thiếu KL để trống và không tính vào tổng.
+ */
+export function buildPickExport(picks: Pick[], info?: Map<string, SkuStockInfo>, weights?: Map<string, number>): Cell[][] {
+  let total = 0
+  const body = picks.map((p) => {
+    const i = info?.get(skuKey(p.sku))
+    const cells: Cell[] = [
+      p.picked_at, p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no ?? '', p.note,
+      i ? i.total : '', i ? i.estimate : '', i ? i.hold : '',
+    ]
+    if (weights) {
+      const kg = weights.get(skuKey(p.sku.replace(/\s+/g, '')))
+      const ok = kg !== undefined && kg > 0
+      if (ok) total += p.qty * kg
+      cells.push(ok ? kg : '', ok ? p.qty * kg : '')
+    }
+    return safeRow(cells)
+  })
+  if (!weights) return [PICK_EXPORT_HEADER, ...body]
+  const header = [...PICK_EXPORT_HEADER, ...PICK_EXPORT_WEIGHT_HEADER]
+  const sum: Cell[] = header.map(() => '')
+  sum[0] = 'Tổng khối lượng'
+  sum[sum.length - 1] = Math.round(total * 1000) / 1000
+  return [header, ...body, safeRow(sum)]
 }
 
 // ---------- CRUD (SQLite worker) ----------

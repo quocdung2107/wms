@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Card, Button, Field, inputClass, Notice } from '../../shared/ui/ui'
 import { errText } from './api'
+import { CustomerPicker } from './NewOrderForm'
 import { NoteAction } from './NoteAction'
 import { STATUSES } from './status'
 import type { GroupCtx, Order } from './types'
@@ -9,7 +10,7 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
   const done = order.status === 'COMPLETED'
   const [assignee, setAssignee] = useState<string | null>(null)
   const [status, setStatus] = useState('')
-  const [cust, setCust] = useState<{ name: string; addr: string } | null>(null)
+  const [cust, setCust] = useState<{ name: string; addr: string; code: string } | null>(null)
   const [ship, setShip] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
   const nextStatuses = STATUSES.filter((s) => s.code !== 'COMPLETED' && s.code !== order.status)
@@ -25,16 +26,20 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
               onSubmit={(e) => {
                 e.preventDefault()
                 setMsg('')
-                act('update_order_customer', { p_customer_name: cust?.name ?? order.customer_name, p_customer_address: cust?.addr ?? order.customer_address })
+                act('update_order_customer', { p_customer_name: cust?.name ?? order.customer_name, p_customer_address: cust?.addr ?? order.customer_address, ...(cust && cust.code !== (order.customer_code ?? '') ? { p_customer_code: cust.code.trim() } : {}) })
                   .then(() => setMsg('Đã lưu.'))
                   .catch((er) => setMsg(errText(er)))
               }}
             >
+              <CustomerPicker
+                value={cust?.code ?? order.customer_code ?? ''}
+                onChange={(code, c) => setCust({ name: c ? c.name : (cust?.name ?? order.customer_name), addr: c ? c.address : (cust?.addr ?? order.customer_address), code })}
+              />
               <Field label="Người đặt hàng">
-                <input className={inputClass} maxLength={100} value={cust?.name ?? order.customer_name} onChange={(e) => setCust({ name: e.target.value, addr: cust?.addr ?? order.customer_address })} />
+                <input className={inputClass} maxLength={100} value={cust?.name ?? order.customer_name} onChange={(e) => setCust({ name: e.target.value, addr: cust?.addr ?? order.customer_address, code: cust?.code ?? order.customer_code ?? '' })} />
               </Field>
               <Field label="Địa chỉ đặt hàng">
-                <input className={inputClass} maxLength={300} value={cust?.addr ?? order.customer_address} onChange={(e) => setCust({ name: cust?.name ?? order.customer_name, addr: e.target.value })} />
+                <input className={inputClass} maxLength={300} value={cust?.addr ?? order.customer_address} onChange={(e) => setCust({ name: cust?.name ?? order.customer_name, addr: e.target.value, code: cust?.code ?? order.customer_code ?? '' })} />
               </Field>
               <Button type="submit">Lưu người đặt hàng</Button>
             </form>

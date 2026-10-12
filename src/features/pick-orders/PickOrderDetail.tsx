@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import PickForm, { fromInputDt, toInputDt, type LocTarget } from '../sku-lookup/PickForm.tsx'
 import { buildPickExport, deletePick, getPickedBySku, getSkuStockInfo, locKey, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
-import { getRowsBySku, getUomMap, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
+import { getRowsBySku, getSkuWeights, getUomMap, listCustomers, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
+import { customerLabel } from '../../shared/inventory/customers.ts'
 import { makeUomLabeler } from '../../shared/inventory/uom.ts'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 import {
-  addLines, deleteLine, deletePickOrder, getPickOrder, listLines, listOrderPicks, setAllowSkuTag, setLineNeed, setOrderRef,
+  addLines, deleteLine, deletePickOrder, getPickOrder, listLines, listOrderPicks, setAllowSkuTag, setCustomerCode, setLineNeed, setOrderRef,
   type PickOrderLine,
 } from './api.ts'
-import { lineProgress, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
+import { fmtKg, lineProgress, weighLines, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
 import { confirmDialog, promptNumber } from '../../shared/ui/Dialog'
 
 type EditState = { pick: Pick; qty: string; location: string; batch: string; note: string; at: string }
@@ -21,6 +22,8 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   const picks = useLoad(() => listOrderPicks(id), [id])
   const lineSkus = useMemo(() => (lines.data ?? []).map((l) => l.sku), [lines.data])
   const info = useLoad(() => getSkuStockInfo(lineSkus), [lineSkus.join('|'), picks.data])
+  const weights = useLoad(getSkuWeights, [])
+  const customers = useLoad(listCustomers, [])
   const [refText, setRefText] = useState<string | null>(null)
   const [term, setTerm] = useState('')
   const [hits, setHits] = useState<SkuHit[]>([])
@@ -40,6 +43,10 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
 
   const done = useMemo(() => pickedBySku(picks.data ?? []), [picks.data])
   const o = order.data
+  const weighed = useMemo(
+    () => weighLines((lines.data ?? []).map((l) => ({ sku: l.sku, qty: done.get(l.sku.toUpperCase()) ?? 0 })), weights.data ?? new Map()),
+    [lines.data, done, weights.data],
+  )
   const fail = (e: unknown) => setErr(e instanceof Error ? e.message : String(e))
   const reloadAll = () => { lines.reload(); picks.reload() }
 
@@ -47,7 +54,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
     if (!o) return
     try {
       const list = picks.data ?? []
-      await exportRows(buildPickExport(list, await getSkuStockInfo(list.map((p) => p.sku))), `picking-${o.code}`, kind)
+      await exportRows(buildPickExport(list, await getSkuStockInfo(list.map((p) => p.sku)), await getSkuWeights()), `picking-${o.code}`, kind)
     } catch (e) { fail(e) }
   }
 
@@ -124,6 +131,10 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
     try { await setOrderRef(id, refText ?? o?.order_ref ?? ''); setRefText(null); order.reload() } catch (e) { fail(e) }
   }
 
+  async function saveCustomer(code: string) {
+    try { await setCustomerCode(id, code); order.reload() } catch (e) { fail(e) }
+  }
+
   async function changeNeed(l: PickOrderLine) {
     const v = await promptNumber(`Số cần của ${l.sku}`, fmtQty(l.qty_need))
     if (v === null) return
@@ -150,6 +161,16 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
               <Button disabled={refText === null} onClick={saveRef}>Lưu</Button>
             </div>
           </Field>
+          <Field label="Khách hàng (có thể để trống)">
+            <select className={inputClass} value={o.customer_code ?? ''} onChange={(e) => saveCustomer(e.target.value)}>
+              <option value="">— Chưa chọn —</option>
+              {o.customer_code && !(customers.data ?? []).some((c) => c.code.trim().toUpperCase() === o.customer_code!.trim().toUpperCase()) && (
+                <option value={o.customer_code}>{o.customer_code}</option>
+              )}
+              {(customers.data ?? []).map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
+            </select>
+          </Field>
+          {o.customer_code && <p>Khách: <b>{customerLabel(o.customer_code, customers.data ?? [])}</b></p>}
           <label className="flex min-h-11 items-center gap-3">
             <input
               type="checkbox" className="h-5 w-5 shrink-0" checked={o.allow_sku_tag}
@@ -160,6 +181,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
         </Card>
       )}
       {(err || order.error || lines.error || picks.error || info.error) && <Notice kind="error">{err || order.error || lines.error || picks.error || info.error}</Notice>}
+      {weighed.missing > 0 && <Notice kind="warn">{weighed.missing} SKU thiếu KL</Notice>}
       {msg && <Notice kind="info">{msg}</Notice>}
       {errs.length > 0 && (
         <Notice kind="warn">
@@ -194,9 +216,11 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       </Card>
 
       <h3 className="text-lg font-bold">Hàng cần lấy</h3>
+      {(lines.data?.length ?? 0) > 0 && <p>Tổng khối lượng (đã lấy): <b>{fmtKg(weighed.totalKg)} kg</b></p>}
       {!lines.loading && (lines.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có dòng nào.</p>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {(lines.data ?? []).map((l) => {
+        {(lines.data ?? []).map((l, idx) => {
+          const w = weighed.rows[idx]
           const pr = lineProgress(l.qty_need, done.get(l.sku.toUpperCase()) ?? 0)
           const i = info.data?.get(skuKey(l.sku))
           return (
@@ -205,6 +229,11 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
               {l.description && <p className="text-sm text-slate-600">{l.description}</p>}
               <p>Cần <b>{fmtQty(pr.need)}</b> · Đã lấy <b>{fmtQty(pr.picked)}</b> · Còn thiếu{' '}
                 <b className={pr.missing > 0 ? 'text-red-700' : 'text-green-700'}>{fmtQty(pr.missing)}</b> {l.uom}</p>
+              <p className="text-sm text-slate-600">
+                {w?.unitKg == null
+                  ? <span className="font-semibold text-amber-700">thiếu KL</span>
+                  : <>KL đơn vị <b>{fmtKg(w.unitKg)}</b> kg · KL dòng <b>{fmtKg(w.lineKg ?? 0)}</b> kg</>}
+              </p>
               {i && (
                 <p className="text-sm text-slate-600">Tổng hệ thống <b>{fmtQty(i.total)}</b> · Tồn ước tính{' '}
                   <b className={i.estimate < 0 ? 'text-red-700' : ''}>{fmtQty(i.estimate)}</b> · Hold <b>{fmtQty(i.hold)}</b> {l.uom}</p>
