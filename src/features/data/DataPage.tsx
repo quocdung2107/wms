@@ -3,6 +3,7 @@ import { dbReady } from '../../shared/db/client.ts'
 import { deleteSource, listSources, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Card, Notice, useLoad } from '../../shared/ui/ui.tsx'
 import ImportWizard from './ImportWizard.tsx'
+import WeightWizard from './WeightWizard.tsx'
 import { confirmDialog } from '../../shared/ui/Dialog'
 
 export default function DataPage() {
@@ -10,7 +11,9 @@ export default function DataPage() {
   const storage = useLoad(() => dbReady, [])
   const [pending, setPending] = useState<{ file: File; forSource?: Source } | null>(null)
   const [message, setMessage] = useState('')
+  const [weightFile, setWeightFile] = useState<File | null>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const weightPicker = useRef<HTMLInputElement>(null)
   const forRef = useRef<Source | undefined>(undefined)
 
   function pick(forSource?: Source) {
@@ -47,7 +50,32 @@ export default function DataPage() {
         }}
       />
 
-      {pending ? (
+      <input
+        ref={weightPicker}
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) {
+            setMessage('')
+            setWeightFile(file)
+          }
+        }}
+      />
+
+      {weightFile ? (
+        <WeightWizard
+          key={weightFile.name + weightFile.lastModified}
+          file={weightFile}
+          onCancel={() => setWeightFile(null)}
+          onDone={(m) => {
+            setWeightFile(null)
+            setMessage(m)
+          }}
+        />
+      ) : pending ? (
         <ImportWizard
           key={pending.file.name + pending.file.lastModified}
           file={pending.file}
@@ -61,7 +89,10 @@ export default function DataPage() {
           }}
         />
       ) : (
-        <Button kind="primary" onClick={() => pick()}>Nạp file Excel/CSV</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button kind="primary" onClick={() => pick()}>Nạp file Excel/CSV</Button>
+          <Button onClick={() => weightPicker.current?.click()}>Nạp file khối lượng</Button>
+        </div>
       )}
 
       <h2 className="pt-2 text-lg font-semibold">Nguồn đã nạp</h2>
