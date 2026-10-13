@@ -4,6 +4,7 @@ import type { InvRow } from './sheet.ts'
 import type { WeightRow } from './weight.ts'
 import { DEFAULT_UOM } from './uom.ts'
 import { CUSTOMER_FIELDS, customerKey, normalizeCustomer, validateCustomer, type Customer } from './customers.ts'
+import type { EditLog, EditOp, EditPlan } from './edit.ts'
 import { pickOrdersUpgradeSql, picksUpgradeSql } from '../../features/pick-orders/logic.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
@@ -60,6 +61,9 @@ export function initSchema() {
       { sql: 'CREATE TABLE IF NOT EXISTS sku_weight (sku_key TEXT PRIMARY KEY, sku TEXT NOT NULL, weight_kg REAL NOT NULL)' },
       // Khách hàng. pick_orders.customer_code chỉ là chữ thường, không khoá ngoại (xoá khách không ảnh hưởng PK).
       { sql: 'CREATE TABLE IF NOT EXISTS customers (code_key TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL, short_name TEXT, address TEXT, delivery_address TEXT, contact TEXT, sup TEXT, phone1 TEXT, phone2 TEXT, note TEXT)' },
+      // Nhật ký sửa/di chuyển/tách/gộp dòng tồn (before/after: JSON). Không khoá ngoại, sống sót khi nạp lại file.
+      { sql: 'CREATE TABLE IF NOT EXISTS inventory_edits (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, sku TEXT, source TEXT, before TEXT, after TEXT)' },
+      { sql: 'CREATE INDEX IF NOT EXISTS idx_inv_edits_at ON inventory_edits(at)' },
     ])
     // DB cũ: picks chưa có cột pick_order_id -> thêm (không mất dữ liệu cũ).
     const cols = (await query('PRAGMA table_info(picks)')).map((c) => String(c.name))
@@ -232,4 +236,52 @@ export async function updateCustomer(code: string, input: Partial<Customer>): Pr
 export async function deleteCustomer(code: string) {
   await initSchema()
   await batch([{ sql: 'DELETE FROM customers WHERE code_key = ?', bind: [customerKey(code)] }])
+}
+
+// ---------- Sửa / di chuyển / tách / gộp dòng tồn ----------
+
+const nowStamp = () => {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/** Đổi EditOp thành câu SQL; tên cột lấy từ STD_FIELDS (không nối chuỗi từ ngoài). */
+type SqlBind = (string | number | null)[]
+export function editOpsToSql(ops: EditOp[]): { sql: string; bind?: SqlBind }[] {
+  const cols = new Set<string>(STD_FIELDS)
+  return ops.map((o) => {
+    if (o.op === 'delete') return { sql: 'DELETE FROM inventory_rows WHERE id = ?', bind: [o.id] }
+    if (o.op === 'insert') {
+      const c = ['source_id', ...STD_FIELDS]
+      return { sql: `INSERT INTO inventory_rows (${c.join(',')}) VALUES (${c.map(() => '?').join(',')})`, bind: [o.source_id, ...STD_FIELDS.map((f) => o.row[f])] as SqlBind }
+    }
+    const keys = Object.keys(o.set).filter((k) => cols.has(k)) as StdField[]
+    return { sql: `UPDATE inventory_rows SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, bind: [...keys.map((k) => o.set[k] ?? null), o.id] as SqlBind }
+  })
+}
+
+export const editLogSql = (log: EditLog, at = nowStamp()) => ({
+  sql: 'INSERT INTO inventory_edits (at, kind, sku, source, before, after) VALUES (?, ?, ?, ?, ?, ?)',
+  bind: [at, log.kind, log.sku, log.source, JSON.stringify(log.before), JSON.stringify(log.after)],
+})
+
+/** Áp một kế hoạch (từ planEdit/Move/Split/Merge): thao tác dòng + 1 dòng nhật ký trong một giao dịch. */
+export async function applyEditPlan(plan: EditPlan): Promise<void> {
+  if (!plan.ok) throw new Error(plan.error)
+  await initSchema()
+  await batch([...editOpsToSql(plan.ops), editLogSql(plan.log)])
+}
+
+export interface InventoryEdit { id: number; at: string; kind: string; sku: string; source: string; before: unknown; after: unknown }
+
+const parseJson = (v: unknown) => { try { return JSON.parse(String(v ?? 'null')) } catch { return null } }
+
+/** Nhật ký thao tác, mới nhất trước. */
+export async function listInventoryEdits(limit = 200): Promise<InventoryEdit[]> {
+  await initSchema()
+  return (await query('SELECT * FROM inventory_edits ORDER BY at DESC, id DESC LIMIT ?', [limit])).map((r) => ({
+    id: r.id as number, at: String(r.at ?? ''), kind: String(r.kind ?? ''), sku: String(r.sku ?? ''), source: String(r.source ?? ''),
+    before: parseJson(r.before), after: parseJson(r.after),
+  }))
 }

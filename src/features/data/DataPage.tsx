@@ -4,6 +4,7 @@ import { deleteSource, listSources, type Source } from '../../shared/inventory/r
 import { Button, Card, Notice, useLoad } from '../../shared/ui/ui.tsx'
 import ImportWizard from './ImportWizard.tsx'
 import WeightWizard from './WeightWizard.tsx'
+import { EditLogPanel, RowsPanel } from './RowEditDialogs.tsx'
 import { confirmDialog } from '../../shared/ui/Dialog'
 
 export default function DataPage() {
@@ -15,6 +16,9 @@ export default function DataPage() {
   const picker = useRef<HTMLInputElement>(null)
   const weightPicker = useRef<HTMLInputElement>(null)
   const forRef = useRef<Source | undefined>(undefined)
+  const [openRows, setOpenRows] = useState<number | null>(null)
+  const [showLog, setShowLog] = useState(false)
+  const [logKey, setLogKey] = useState(0)
 
   function pick(forSource?: Source) {
     forRef.current = forSource
@@ -107,6 +111,9 @@ export default function DataPage() {
             </p>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => pick(s)}>Nạp file mới</Button>
+              <Button onClick={() => setOpenRows(openRows === s.id ? null : s.id)}>
+                {openRows === s.id ? 'Ẩn dòng' : 'Xem / sửa dòng'}
+              </Button>
               <Button
                 kind="danger"
                 onClick={async () => {
@@ -119,9 +126,13 @@ export default function DataPage() {
                 Xoá
               </Button>
             </div>
+            {openRows === s.id && <RowsPanel source={s} onChanged={() => setLogKey((k) => k + 1)} />}
           </Card>
         ))}
       </div>
+
+      <Button onClick={() => setShowLog(!showLog)}>{showLog ? 'Ẩn nhật ký chỉnh sửa' : 'Nhật ký chỉnh sửa'}</Button>
+      {showLog && <EditLogPanel key={logKey} />}
     </div>
   )
 }

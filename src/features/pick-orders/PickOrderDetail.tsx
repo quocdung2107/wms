@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PickForm, { fromInputDt, toInputDt, type LocTarget } from '../sku-lookup/PickForm.tsx'
-import { buildPickExport, deletePick, getPickedBySku, getSkuStockInfo, locKey, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
+import { buildPickExport, deletePick, getPickedBySku, getSkuStockInfo, locKey, nowLocal, savePick, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
 import { getRowsBySku, getSkuWeights, getUomMap, listCustomers, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
@@ -13,6 +13,9 @@ import {
 } from './api.ts'
 import { fmtKg, lineProgress, weighLines, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
 import { confirmDialog, promptNumber } from '../../shared/ui/Dialog'
+import { suggestPick, type SuggestItem } from './suggest.ts'
+
+type AutoLine = { line: PickOrderLine; items: SuggestItem[]; missing: number }
 
 type EditState = { pick: Pick; qty: string; location: string; batch: string; note: string; at: string }
 
@@ -34,6 +37,8 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   const [err, setErr] = useState('')
   const [form, setForm] = useState<{ line: PickOrderLine; target: LocTarget; choices: LocTarget[] } | null>(null)
   const [edit, setEdit] = useState<EditState | null>(null)
+  const [auto, setAuto] = useState<AutoLine[] | null>(null)
+  const [autoBusy, setAutoBusy] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -103,6 +108,53 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       const target: LocTarget = { sku: line.sku, description: line.description, source: '', location: '', batch_no: '', uom: line.uom, qtySystem: null, picked: 0 }
       setForm({ line, target, choices })
     } catch (e) { fail(e) }
+  }
+
+  async function previewAuto() {
+    setErr(''); setMsg('')
+    try {
+      const out: AutoLine[] = []
+      const pickedCache = new Map<string, Map<string, number>>()
+      for (const l of lines.data ?? []) {
+        const need = Math.round((l.qty_need - (done.get(l.sku.toUpperCase()) ?? 0)) * 1e6) / 1e6
+        if (need <= 0) continue
+        const key = l.sku.toUpperCase()
+        let picked = pickedCache.get(key)
+        if (!picked) { picked = new Map(await getPickedBySku(l.sku)); pickedCache.set(key, picked) }
+        const res = suggestPick(await getRowsBySku(l.sku), need, picked)
+        // Dòng PK trùng SKU: trừ phần đã gợi ý để không lấy trùng cùng một vị trí.
+        for (const it of res.items) {
+          const k = locKey(it.row.source, it.row.location, it.row.batch_no)
+          picked.set(k, (picked.get(k) ?? 0) + it.qty)
+        }
+        out.push({ line: l, items: res.items, missing: res.missing })
+      }
+      if (out.length === 0) return setMsg('Mọi dòng đã đủ, không còn gì để tự chọn.')
+      setAuto(out)
+    } catch (e) { fail(e) }
+  }
+
+  async function confirmAuto() {
+    if (!auto || !o) return
+    setAutoBusy(true)
+    try {
+      const uomOf = makeUomLabeler(await getUomMap())
+      const at = nowLocal()
+      let n = 0
+      for (const a of auto) {
+        for (const it of a.items) {
+          await savePick({
+            sku: a.line.sku, description: a.line.description || it.row.description || '', source: it.row.source,
+            location: (it.row.location ?? '').trim(), batch_no: (it.row.batch_no ?? '').trim(),
+            uom: a.line.uom || uomOf(it.row.uom_raw), qty: it.qty, order_no: o.code, picked_at: at, note: '', pick_order_id: id,
+          })
+          n++
+        }
+      }
+      setAuto(null)
+      setMsg(`Đã ghi ${n} lần lấy.`)
+      reloadAll()
+    } catch (e) { fail(e) } finally { setAutoBusy(false) }
   }
 
   async function saveEdit() {
@@ -217,6 +269,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
 
       <h3 className="text-lg font-bold">Hàng cần lấy</h3>
       {(lines.data?.length ?? 0) > 0 && <p>Tổng khối lượng (đã lấy): <b>{fmtKg(weighed.totalKg)} kg</b></p>}
+      {(lines.data?.length ?? 0) > 0 && <Button kind="primary" onClick={previewAuto}>Tự chọn tất cả</Button>}
       {!lines.loading && (lines.data?.length ?? 0) === 0 && <p className="text-slate-600">Chưa có dòng nào.</p>}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(lines.data ?? []).map((l, idx) => {
@@ -282,6 +335,27 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
           onClose={() => setForm(null)}
           onSaved={reloadAll}
         />
+      )}
+      {auto && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" role="dialog" aria-modal="true" aria-label="Xem trước tự chọn">
+          <div className="max-h-[90vh] w-full max-w-lg space-y-3 overflow-y-auto rounded-t-xl bg-white p-4 shadow-lg sm:rounded-xl">
+            <h2 className="text-xl font-bold">Xem trước tự chọn</h2>
+            {auto.every((a) => a.items.length === 0) && <Notice kind="warn">Không dòng nào có tồn để lấy.</Notice>}
+            {auto.map((a) => (
+              <div key={a.line.id} className="space-y-1 border-b border-slate-200 pb-2">
+                <p className="font-bold">{a.line.sku} <span className="font-normal text-slate-600">{a.line.description}</span></p>
+                {a.items.map((it, k) => (
+                  <p key={k} className="text-sm">{it.row.location || '—'}{it.row.batch_no ? ` · ${it.row.batch_no}` : ''} · lấy <b>{fmtQty(it.qty)}</b> {a.line.uom}</p>
+                ))}
+                {a.missing > 0 && <p className="text-sm font-semibold text-red-700">Thiếu {fmtQty(a.missing)} {a.line.uom}</p>}
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <Button kind="primary" className="flex-1" disabled={autoBusy || auto.every((a) => a.items.length === 0)} onClick={confirmAuto}>Xác nhận lấy</Button>
+              <Button className="flex-1" disabled={autoBusy} onClick={() => setAuto(null)}>Huỷ</Button>
+            </div>
+          </div>
+        </div>
       )}
       {edit && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Sửa lần lấy">

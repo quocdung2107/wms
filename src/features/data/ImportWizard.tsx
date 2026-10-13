@@ -5,7 +5,8 @@ import {
   type Column, type ExtractResult, type HeaderInfo, type Mapping, type StdField,
 } from '../../shared/excel/reader.ts'
 import { FIELD_LABELS } from '../../shared/inventory/labels.ts'
-import { replaceRows, saveSource, type SavedMapping, type Source } from '../../shared/inventory/repo.ts'
+import { confirmDialog } from '../../shared/ui/Dialog'
+import { listInventoryEdits, replaceRows, saveSource, type SavedMapping, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui.tsx'
 
 interface Props {
@@ -102,6 +103,14 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
       }
       const result = await excel.extract(sheet, info, mapping)
       if (result.rows.length === 0) throw new Error('Không đọc được dòng nào có SKU. Kiểm tra dòng tiêu đề và cột SKU.')
+      const prev = forSource ?? sources.find((s) => s.name === name.trim())
+      if (prev?.loaded_at) {
+        const edited = (await listInventoryEdits(1000)).some((e) => e.source === prev.name && e.at > prev.loaded_at)
+        if (edited && !(await confirmDialog(`Nguồn "${prev.name}" có chỉnh sửa tay sau lần nạp trước. Chỉnh sửa tay sẽ bị thay mới khi nạp lại. Tiếp tục?`, { danger: true, okText: 'Nạp, thay mới' }))) {
+          setBusy(false)
+          return
+        }
+      }
       const id = await saveSource({ name: name.trim(), sheet, header_row: info.headerRow, header_rows: info.headerRows, mapping: labels })
       const skipped = `${result.skippedNoSku} dòng không có SKU, ${result.skippedTotal} dòng tổng`
       await replaceRows(id, result.rows, { file_name: file.name, skipped })
