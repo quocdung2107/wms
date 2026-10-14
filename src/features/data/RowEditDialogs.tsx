@@ -7,7 +7,7 @@ import { getPickedBySku } from '../../shared/inventory/history.ts'
 import { applyEditPlan, getRows, listInventoryEdits, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 
-const KIND_LABEL: Record<string, string> = { edit: 'Sửa', move: 'Di chuyển', split: 'Tách', merge: 'Gộp' }
+const KIND_LABEL: Record<string, string> = { edit: 'Sửa', move: 'Di chuyển', split: 'Tách', merge: 'Gộp', receive: 'Nhập hàng' }
 
 type Modal =
   | { type: 'edit' | 'move' | 'split'; row: EditRow }

@@ -23,6 +23,7 @@ const TOOLS: { group: string; path: string; title: string; hint: string; icon: I
   { group: 'In ấn & file', path: 'barcode', title: 'Barcode / QR', hint: 'Mã Code128 và QR, in hàng loạt', icon: 'barcode', page: lazy(() => import('../features/barcode/BarcodePage.tsx')) },
   { group: 'In ấn & file', path: 'label', title: 'Label Maker', hint: 'Giấy đánh dấu pallet, vị trí, lô trên A4', icon: 'tag', page: lazy(() => import('../features/label-maker/LabelMakerPage.tsx')) },
   { group: 'In ấn & file', path: 'excel', title: 'Excel Formatter', hint: 'Lọc, sắp xếp, đổi tên, nhóm, tách, gộp cột', icon: 'chart', page: lazy(() => import('../features/excel-formatter/ExcelFormatterPage.tsx')) },
+  { group: 'Dữ liệu', path: 'nhap-hang', title: 'Nhập hàng', hint: 'Nhập tay hàng về: cộng vào dòng có sẵn hoặc thêm dòng mới', icon: 'box', page: lazy(() => import('../features/receive/ReceivePage.tsx')) },
   { group: 'Dữ liệu', path: 'khach-hang', title: 'Khách hàng', hint: 'Danh sách khách: mã, địa chỉ giao, Sup, SĐT', icon: 'users', page: lazy(() => import('../features/customers/CustomersPage.tsx')) },
   { group: 'Dữ liệu', path: 'dvt', title: 'Đơn vị tính', hint: 'Gom CAI / CÁI / Cái về một tên', icon: 'scale', page: lazy(() => import('../features/settings/UomPage.tsx')) },
 ]

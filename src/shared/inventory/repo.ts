@@ -6,6 +6,7 @@ import { DEFAULT_UOM } from './uom.ts'
 import { CUSTOMER_FIELDS, customerKey, normalizeCustomer, validateCustomer, type Customer } from './customers.ts'
 import type { EditLog, EditOp, EditPlan } from './edit.ts'
 import { pickOrdersUpgradeSql, picksUpgradeSql } from '../../features/pick-orders/logic.ts'
+import type { ReceivePlan } from './receive.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
 
@@ -271,6 +272,14 @@ export async function applyEditPlan(plan: EditPlan): Promise<void> {
   if (!plan.ok) throw new Error(plan.error)
   await initSchema()
   await batch([...editOpsToSql(plan.ops), editLogSql(plan.log)])
+}
+
+/** Áp phiếu nhập (từ planReceive): mọi thao tác dòng + mỗi SKU một dòng nhật ký, trong một giao dịch. */
+export async function applyReceivePlan(plan: ReceivePlan): Promise<void> {
+  if (!plan.ok) throw new Error(plan.error)
+  await initSchema()
+  const at = nowStamp()
+  await batch([...editOpsToSql(plan.ops), ...plan.logs.map((l) => editLogSql(l, at))])
 }
 
 export interface InventoryEdit { id: number; at: string; kind: string; sku: string; source: string; before: unknown; after: unknown }

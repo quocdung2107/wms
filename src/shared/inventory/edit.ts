@@ -15,7 +15,7 @@ export type EditOp =
   | { op: 'insert'; source_id: number; row: StdRow }
   | { op: 'delete'; id: number }
 
-export type EditKind = 'edit' | 'move' | 'split' | 'merge'
+export type EditKind = 'edit' | 'move' | 'split' | 'merge' | 'receive'
 
 export interface RowSnap { id?: number; location: string; batch_no: string; manuf_date: string; qty: number }
 
@@ -26,8 +26,8 @@ export type EditPlan = { ok: true; ops: EditOp[]; log: EditLog } | { ok: false; 
 export interface PartInput { location: string; batch_no: string; manuf_date: string; qty: number }
 
 const fail = (error: string): EditPlan => ({ ok: false, error })
-const r6 = (n: number) => Math.round(n * 1e6) / 1e6
-const t = (s: string | null | undefined) => (s ?? '').trim()
+export const r6 = (n: number) => Math.round(n * 1e6) / 1e6
+export const t = (s: string | null | undefined) => (s ?? '').trim()
 
 const pickedOf = (picked: PickedMap, r: { source: string }, location: string, batch: string) =>
   picked.get(locKey(r.source, location, batch)) ?? 0
