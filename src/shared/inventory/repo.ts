@@ -285,14 +285,19 @@ const nowStamp = () => {
 type SqlBind = (string | number | null)[]
 export function editOpsToSql(ops: EditOp[]): { sql: string; bind?: SqlBind }[] {
   const cols = new Set<string>(STD_FIELDS)
-  return ops.map((o) => {
-    if (o.op === 'delete') return { sql: 'DELETE FROM inventory_rows WHERE id = ?', bind: [o.id] }
+  return ops.flatMap((o): { sql: string; bind?: SqlBind }[] => {
+    if (o.op === 'delete') return [{ sql: 'DELETE FROM inventory_rows WHERE id = ?', bind: [o.id] }]
+    if (o.op === 'repoint_picks') return [{ sql: 'UPDATE picks SET lot_id = ? WHERE lot_id = ?', bind: [o.to, o.from] }]
     if (o.op === 'insert') {
-      const c = ['source_id', ...STD_FIELDS]
-      return { sql: `INSERT INTO inventory_rows (${c.join(',')}) VALUES (${c.map(() => '?').join(',')})`, bind: [o.source_id, ...STD_FIELDS.map((f) => o.row[f])] as SqlBind }
+      // lot_id mới: tăng lot_counter (không tái dùng) rồi lấy giá trị, trong cùng giao dịch
+      const c = ['source_id', ...STD_FIELDS, 'lot_id']
+      return [
+        { sql: 'UPDATE lot_counter SET n = n + 1 WHERE id = 1' },
+        { sql: `INSERT INTO inventory_rows (${c.join(',')}) VALUES (?,${STD_FIELDS.map(() => '?').join(',')},(SELECT n FROM lot_counter WHERE id = 1))`, bind: [o.source_id, ...STD_FIELDS.map((f) => o.row[f])] as SqlBind },
+      ]
     }
     const keys = Object.keys(o.set).filter((k) => cols.has(k)) as StdField[]
-    return { sql: `UPDATE inventory_rows SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, bind: [...keys.map((k) => o.set[k] ?? null), o.id] as SqlBind }
+    return [{ sql: `UPDATE inventory_rows SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, bind: [...keys.map((k) => o.set[k] ?? null), o.id] as SqlBind }]
   })
 }
 

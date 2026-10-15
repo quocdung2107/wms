@@ -102,7 +102,7 @@ export function planReceive(
   const ops: EditOp[] = []
   const logMap = new Map<string, EditLog>()
   const pickedAt = (k: string, location: string, batch: string) => picked.get(k)?.get(locKey(source.name, location, batch)) ?? 0
-  const snap = (r: EditRow, qty: number): RowSnap => ({ id: r.id, location: t(r.location), batch_no: t(r.batch_no), manuf_date: t(r.manuf_date), qty })
+  const snap = (r: EditRow, qty: number): RowSnap => ({ id: r.id, lot_id: r.lot_id ?? null, location: t(r.location), batch_no: t(r.batch_no), manuf_date: t(r.manuf_date), qty })
 
   for (const g of groups.values()) {
     const k = skuKey(g.sku)

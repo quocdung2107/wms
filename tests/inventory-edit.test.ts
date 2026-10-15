@@ -17,7 +17,7 @@ function apply(rows: EditRow[], ops: EditOp[]): EditRow[] {
   for (const o of ops) {
     if (o.op === 'delete') out = out.filter((r) => r.id !== o.id)
     else if (o.op === 'update') Object.assign(out.find((r) => r.id === o.id)!, o.set)
-    else out.push({ ...o.row, id: nid++, source_id: o.source_id, source: 'A' })
+    else if (o.op === 'insert') out.push({ ...o.row, id: nid++, source_id: o.source_id, source: 'A', lot_id: 9000 + nid })
   }
   return out
 }
@@ -150,4 +150,36 @@ test('AC-5 mỗi thao tác có nhật ký (kind, sku, trước, sau)', () => {
   ]
   assert.deepEqual(logs.map((l) => l.kind), ['edit', 'move', 'split', 'merge'])
   for (const l of logs) { assert.equal(l.sku, 'S1'); assert.ok(l.before.length >= 1 && l.after.length >= 1) }
+})
+
+test('AC-3 lot_id: sửa giữ lot_id; di chuyển một phần giữ lot gốc, dòng mới lot mới', () => {
+  const r = row({ lot_id: 7 }); const p = pk()
+  const e = apply([r], okPlan(planEdit(r, { location: 'L9', batch_no: 'B9', manuf_date: '2026-02-02' }, p)).ops)
+  assert.equal(e[0].lot_id, 7)
+  const m = apply([r], okPlan(planMove(r, 30, 'L2', [r], p)).ops)
+  assert.equal(m.find((x) => x.id === r.id)!.lot_id, 7)
+  assert.notEqual(m.find((x) => x.id !== r.id)!.lot_id, 7)
+})
+
+test('AC-3 lot_id: tách phần 1 giữ lot gốc, phần khác lot mới', () => {
+  const r = row({ lot_id: 7 }); const p = pk()
+  const parts = [{ location: 'L1', batch_no: 'B1', manuf_date: '2026-01-01', qty: 60 }, { location: 'L2', batch_no: 'B1', manuf_date: '2026-01-01', qty: 40 }]
+  const out = apply([r], okPlan(planSplit(r, parts, p)).ops)
+  assert.equal(out[0].lot_id, 7)
+  assert.notEqual(out[1].lot_id, 7)
+})
+
+test('AC-3 lot_id: gộp giữ lot dòng đầu, chuyển picks.lot_id, ghi lot trong nhật ký', () => {
+  const a = row({ lot_id: 1 }); const b = row({ location: 'L2', lot_id: 2 }); const c = row({ location: 'L3', lot_id: 3 })
+  const plan = okPlan(planMerge([a, b, c], 'L1', pk()))
+  const re = plan.ops.filter((o) => o.op === 'repoint_picks')
+  assert.deepEqual(re, [{ op: 'repoint_picks', from: 2, to: 1 }, { op: 'repoint_picks', from: 3, to: 1 }])
+  assert.equal(plan.log.after[0].lot_id, 1)
+  assert.deepEqual(plan.log.before.map((x) => x.lot_id), [1, 2, 3])
+})
+
+test('AC-3 lot_id: hai lô trùng hoàn toàn vẫn giữ riêng (không tự gộp khi sửa/di chuyển)', () => {
+  const a = row({ lot_id: 1 }); const b = row({ lot_id: 2 }); const p = pk()
+  const out = apply([a, b], okPlan(planEdit(a, { location: 'L1', batch_no: 'B1', manuf_date: '2026-01-01' }, p)).ops)
+  assert.deepEqual(out.map((x) => x.lot_id), [1, 2])
 })

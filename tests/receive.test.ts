@@ -21,7 +21,7 @@ function apply(rows: EditRow[], ops: EditOp[]): EditRow[] {
   const out = rows.map((r) => ({ ...r }))
   for (const o of ops) {
     if (o.op === 'update') Object.assign(out.find((r) => r.id === o.id)!, o.set)
-    else if (o.op === 'insert') out.push({ ...o.row, id: nid++, source_id: o.source_id, source: 'A' })
+    else if (o.op === 'insert') out.push({ ...o.row, id: nid++, source_id: o.source_id, source: 'A', lot_id: 9000 + nid })
   }
   return out
 }
@@ -88,4 +88,16 @@ test('AC-3 tồn ước tính tăng đúng bằng SL nhập khi đã có picked'
   assert.equal(after[0].qty_system, 110)
   assert.equal(rowEstimate(after[1], m), 4)
   assert.equal(after[1].qty_system, 11)
+})
+
+test('AC-4 lot_id: khớp thì giữ lot_id lô có sẵn; không khớp thì lot mới; hai lô trùng giữ riêng', () => {
+  const r = row({ lot_id: 5 })
+  const out = apply([r], okPlan(planReceive(src, [line(), line({ location: 'L2', qty: 5 })], [r], new Map())).ops)
+  assert.equal(out[0].lot_id, 5)
+  assert.equal(out[0].qty_system, 110)
+  assert.ok(out[1].lot_id != null && out[1].lot_id !== 5)
+  const a = row({ lot_id: 1 }); const b = row({ lot_id: 2 })
+  const out2 = apply([a, b], okPlan(planReceive(src, [line()], [a, b], new Map())).ops)
+  assert.deepEqual(out2.map((x) => x.lot_id), [1, 2])
+  assert.equal(out2.length, 2)
 })

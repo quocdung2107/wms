@@ -1,23 +1,27 @@
 // Sửa / di chuyển / tách / gộp dòng tồn. Hàm thuần: nhận dòng + "đã lấy" (theo locKey, của đúng SKU),
 // trả danh sách thao tác SQL (EditOp) + bản ghi nhật ký, hoặc lỗi. repo.ts mới ghi vào DB.
 //
+// Lô (lot_id): sửa/di chuyển một phần/tách phần 1 giữ lot_id; dòng insert được repo cấp lot_id mới từ lot_counter;
+// gộp chuyển picks.lot_id của dòng bị xoá sang dòng đầu.
+//
 // Giữ tồn ước tính: ước tính = qty_system - picked(locKey). Picks cũ giữ nguyên khoá cũ, nên khi dòng
 // sang khoá mới ta đặt qty_system mới = ước tính cần giữ + picked(khoá mới) -> ước tính không đổi.
 import type { StdRow } from '../excel/reader.ts'
 import { locKey, skuKey } from './history.ts'
 import type { InvRow } from './sheet.ts'
 
-export type EditRow = InvRow & { source: string } // source = tên nguồn (khớp picks.source)
+export type EditRow = InvRow & { source: string; lot_id?: number | null } // source = tên nguồn (khớp picks.source)
 export type PickedMap = Map<string, number> // locKey -> đã lấy (của một SKU)
 
 export type EditOp =
   | { op: 'update'; id: number; set: Partial<StdRow> }
   | { op: 'insert'; source_id: number; row: StdRow }
   | { op: 'delete'; id: number }
+  | { op: 'repoint_picks'; from: number; to: number } // gộp: picks.lot_id của lô bị xoá -> lô giữ lại
 
 export type EditKind = 'edit' | 'move' | 'split' | 'merge' | 'receive'
 
-export interface RowSnap { id?: number; location: string; batch_no: string; manuf_date: string; qty: number }
+export interface RowSnap { id?: number; lot_id?: number | null; location: string; batch_no: string; manuf_date: string; qty: number }
 
 export interface EditLog { kind: EditKind; sku: string; source: string; before: RowSnap[]; after: RowSnap[] }
 
@@ -55,7 +59,7 @@ export function normDate(s: string | null | undefined): string | null {
 }
 
 const snap = (r: EditRow, picked: PickedMap): RowSnap => ({
-  id: r.id, location: t(r.location), batch_no: t(r.batch_no), manuf_date: t(r.manuf_date), qty: rowEstimate(r, picked),
+  id: r.id, lot_id: r.lot_id ?? null, location: t(r.location), batch_no: t(r.batch_no), manuf_date: t(r.manuf_date), qty: rowEstimate(r, picked),
 })
 
 /** Dòng mới sao chép thông tin SKU/ĐVT/nguồn từ dòng gốc; số lượng phụ (khả dụng/hỏng/hold) để trống. */
@@ -84,7 +88,7 @@ export function planEdit(
   const est = rowEstimate(row, picked)
   const set: Partial<StdRow> = { location, batch_no: batch, manuf_date: manuf }
   if (row.qty_system !== null && row.qty_system !== undefined) set.qty_system = r6(est + pickedOf(picked, row, location, batch))
-  const after: RowSnap = { id: row.id, location, batch_no: batch, manuf_date: manuf, qty: est }
+  const after: RowSnap = { id: row.id, lot_id: row.lot_id ?? null, location, batch_no: batch, manuf_date: manuf, qty: est }
   return { ok: true, ops: [{ op: 'update', id: row.id, set }], log: { kind: 'edit', sku: row.sku, source: row.source, before: [snap(row, picked)], after: [after] } }
 }
 
@@ -147,7 +151,7 @@ export function planSplit(row: EditRow, parts: PartInput[], picked: PickedMap): 
     if (i === 0) ops.push({ op: 'update', id: row.id, set: { location: p.location, batch_no: p.batch_no, manuf_date: p.manuf_date, qty_system: qs } })
     else ops.push({ op: 'insert', source_id: row.source_id, row: cloneRow(row, { ...p, qty_system: qs }) })
   })
-  const after = norm.map((p, i): RowSnap => ({ ...(i === 0 ? { id: row.id } : {}), location: p.location, batch_no: p.batch_no, manuf_date: p.manuf_date, qty: p.qty }))
+  const after = norm.map((p, i): RowSnap => ({ ...(i === 0 ? { id: row.id, lot_id: row.lot_id ?? null } : {}), location: p.location, batch_no: p.batch_no, manuf_date: p.manuf_date, qty: p.qty }))
   return { ok: true, ops, log: { kind: 'split', sku: row.sku, source: row.source, before: [snap(row, picked)], after } }
 }
 
@@ -176,8 +180,11 @@ export function planMerge(rows: EditRow[], location: string, picked: PickedMap):
         qty_available: sumOf('qty_available'), qty_damaged: sumOf('qty_damaged'), qty_hold: sumOf('qty_hold'),
       },
     },
-    ...rows.slice(1).map((r): EditOp => ({ op: 'delete', id: r.id })),
+    ...rows.slice(1).flatMap((r): EditOp[] => [
+      ...(r.lot_id != null && first.lot_id != null && r.lot_id !== first.lot_id ? [{ op: 'repoint_picks' as const, from: r.lot_id, to: first.lot_id }] : []),
+      { op: 'delete', id: r.id },
+    ]),
   ]
-  const after: RowSnap = { id: first.id, location: loc, batch_no: batch, manuf_date: t(first.manuf_date), qty: total }
+  const after: RowSnap = { id: first.id, lot_id: first.lot_id ?? null, location: loc, batch_no: batch, manuf_date: t(first.manuf_date), qty: total }
   return { ok: true, ops, log: { kind: 'merge', sku: first.sku, source: first.source, before: rows.map((r) => snap(r, picked)), after: [after] } }
 }
