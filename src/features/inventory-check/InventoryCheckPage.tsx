@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
+import { assignCounts, listLatestCounts } from '../../shared/inventory/history.ts'
 import { NoDataNotice, useSourceRows } from '../../shared/inventory/hooks.tsx'
 import {
   buildSheet, countLines, DEFAULT_OPTIONS, distinct, FLAG_TEXT, fmtDate, fmtQty, rackGroup,
   type SheetGroup, type SheetLine, type SheetOptions,
 } from '../../shared/inventory/sheet.ts'
-import { Button, Card, downloadBlob, Field, inputClass, Notice, printPage, usePersisted } from '../../shared/ui/ui.tsx'
+import { Button, Card, downloadBlob, Field, inputClass, Notice, printPage, useLoad, usePersisted } from '../../shared/ui/ui.tsx'
 
 type Prefs = {
   merge: boolean
@@ -25,6 +26,14 @@ const COL_LABELS: Record<keyof Prefs['cols'], string> = {
   note: 'Ghi chú',
 }
 
+type Counts = Map<string, number>
+/** Chênh lệch = đếm - SL hệ thống (null coi như 0); chỉ khi có số đếm. */
+const diffOf = (l: SheetLine, counts: Counts): number | null => {
+  const c = counts.get(l.key)
+  return c === undefined ? null : c - (l.qty_system ?? 0)
+}
+const fmtDiff = (d: number | null) => (d === null ? '' : `${d > 0 ? '+' : ''}${fmtQty(d)}`)
+
 const today = () => new Date().toISOString().slice(0, 10)
 
 function Flag({ line }: { line: SheetLine }) {
@@ -32,7 +41,7 @@ function Flag({ line }: { line: SheetLine }) {
   return <span className="ml-1 rounded bg-amber-200 px-1 text-xs font-bold text-amber-900 print:border print:border-black print:bg-white print:text-black">{FLAG_TEXT[line.flag]}</span>
 }
 
-function SheetTable({ group, title, prefs }: { group: SheetGroup; title: string; prefs: Prefs }) {
+function SheetTable({ group, title, prefs, counts }: { group: SheetGroup; title: string; prefs: Prefs; counts: Counts }) {
   const { cols, blind } = prefs
   const th = 'border border-slate-400 px-1.5 py-1 text-left font-semibold'
   const td = 'border border-slate-400 px-1.5 py-1 align-top'
@@ -76,8 +85,8 @@ function SheetTable({ group, title, prefs }: { group: SheetGroup; title: string;
                   <Flag line={l} />
                 </td>
               )}
-              <td className={td} />
-              <td className={td} />
+              <td className={`${td} whitespace-nowrap text-right font-semibold`}>{counts.has(l.key) ? fmtQty(counts.get(l.key)!) : ''}</td>
+              <td className={`${td} whitespace-nowrap text-right font-semibold`}>{fmtDiff(diffOf(l, counts))}</td>
               {cols.batch && <td className={`${td} ${small}`}>{l.batch_no}{l.lots > 1 ? ` (${l.lots} lot)` : ''}</td>}
               {cols.manuf && <td className={`${td} ${small}`}>{fmtDate(l.manuf_date)}</td>}
               {cols.receive && <td className={`${td} ${small}`}>{fmtDate(l.receive_date)}</td>}
@@ -92,7 +101,7 @@ function SheetTable({ group, title, prefs }: { group: SheetGroup; title: string;
   )
 }
 
-function SheetCards({ group, prefs }: { group: SheetGroup; prefs: Prefs }) {
+function SheetCards({ group, prefs, counts }: { group: SheetGroup; prefs: Prefs; counts: Counts }) {
   const { cols, blind } = prefs
   return (
     <section className="space-y-2 md:hidden print:hidden">
@@ -110,6 +119,12 @@ function SheetCards({ group, prefs }: { group: SheetGroup; prefs: Prefs }) {
           </div>
           <p className="font-semibold">{l.sku}</p>
           <p className="text-slate-700">{l.description}</p>
+          {counts.has(l.key) && (
+            <p className="mt-1 font-semibold">
+              Đã đếm: {fmtQty(counts.get(l.key)!)}
+              {!blind && <span className="ml-2 text-slate-600">Chênh lệch: {fmtDiff(diffOf(l, counts))}</span>}
+            </p>
+          )}
           <dl className="mt-1 grid grid-cols-2 gap-x-3 text-sm text-slate-600">
             {cols.batch && l.batch_no && <div><dt className="inline">Batch: </dt><dd className="inline">{l.batch_no}{l.lots > 1 ? ` (${l.lots} lot)` : ''}</dd></div>}
             {cols.condition && l.condition && <div><dt className="inline">Tình trạng: </dt><dd className="inline font-semibold">{l.condition}</dd></div>}
@@ -123,7 +138,7 @@ function SheetCards({ group, prefs }: { group: SheetGroup; prefs: Prefs }) {
   )
 }
 
-async function exportExcel(groups: SheetGroup[], prefs: Prefs, name: string) {
+async function exportExcel(groups: SheetGroup[], prefs: Prefs, name: string, counts: Counts) {
   const XLSX = await import('xlsx')
   const header = ['Dãy kệ', 'Vị trí', 'SKU', 'Tên hàng', 'ĐVT']
   if (!prefs.blind) header.push('SL hệ thống')
@@ -139,7 +154,9 @@ async function exportExcel(groups: SheetGroup[], prefs: Prefs, name: string) {
     for (const l of g.lines) {
       const r: (string | number)[] = [g.name, l.location, l.sku, l.description, l.uom]
       if (!prefs.blind) r.push(l.qty_system ?? '')
-      r.push('', '')
+      const c = counts.get(l.key)
+      const d = diffOf(l, counts)
+      r.push(c ?? '', d ?? '')
       if (prefs.cols.batch) r.push(l.batch_no)
       if (prefs.cols.manuf) r.push(fmtDate(l.manuf_date))
       if (prefs.cols.receive) r.push(fmtDate(l.receive_date))
@@ -164,6 +181,12 @@ export default function InventoryCheckPage() {
   const opts: SheetOptions = { ...DEFAULT_OPTIONS, ...filters, merge: prefs.merge, blind: prefs.blind }
   const groups = useMemo(() => buildSheet(data.rows, opts, data.uomOf), [data.rows, data.uomOf, filters, prefs.merge]) // eslint-disable-line react-hooks/exhaustive-deps
   const lines = countLines(groups)
+  const latest = useLoad(listLatestCounts, [data.source?.id, data.source?.loaded_at])
+  // Kiểm mù: không điền số đếm. Thứ tự duyệt = thứ tự hiển thị ("dòng đầu" của khoá).
+  const counts: Counts = useMemo(
+    () => (prefs.blind || !latest.data ? new Map() : assignCounts(groups.flatMap((g) => g.lines), latest.data, { merge: prefs.merge, source: data.source?.name })),
+    [groups, latest.data, prefs.blind, prefs.merge, data.source?.name],
+  )
   const title = `Phiếu kiểm kho · ${data.source?.name ?? ''} · ${fmtDate(today())}`
 
   const warehouses = useMemo(() => distinct(data.rows, (r) => r.warehouse), [data.rows])
@@ -223,7 +246,7 @@ export default function InventoryCheckPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button kind="primary" disabled={lines === 0} onClick={() => printPage('landscape')}>In A4 ngang / Lưu PDF</Button>
-            <Button disabled={lines === 0} onClick={() => exportExcel(groups, prefs, data.source?.name ?? 'kiem-kho')}>Xuất Excel</Button>
+            <Button disabled={lines === 0} onClick={() => exportExcel(groups, prefs, data.source?.name ?? 'kiem-kho', counts)}>Xuất Excel</Button>
             <span className="text-slate-600">{lines} dòng · {groups.length} dãy kệ</span>
           </div>
           <p className="text-sm text-slate-500">Muốn lưu PDF: bấm In rồi chọn máy in “Lưu thành PDF”. Chọn khổ A4, lề mặc định.</p>
@@ -234,8 +257,8 @@ export default function InventoryCheckPage() {
 
       {groups.map((g) => (
         <div key={g.name} className="rack-group space-y-2">
-          <SheetCards group={g} prefs={prefs} />
-          <SheetTable group={g} title={title} prefs={prefs} />
+          <SheetCards group={g} prefs={prefs} counts={counts} />
+          <SheetTable group={g} title={title} prefs={prefs} counts={counts} />
         </div>
       ))}
     </div>
