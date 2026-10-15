@@ -5,8 +5,9 @@ import {
   type Column, type ExtractResult, type HeaderInfo, type Mapping, type StdField,
 } from '../../shared/excel/reader.ts'
 import { FIELD_LABELS } from '../../shared/inventory/labels.ts'
-import { confirmDialog } from '../../shared/ui/Dialog'
-import { listInventoryEdits, replaceRows, saveSource, type SavedMapping, type Source } from '../../shared/inventory/repo.ts'
+import { exportRows } from '../../shared/inventory/exportFile.ts'
+import { buildPickExport } from '../../shared/inventory/history.ts'
+import { getPeriodActivity, replaceRows, saveSource, type SavedMapping, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Card, Field, inputClass, Notice } from '../../shared/ui/ui.tsx'
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
 export default function ImportWizard({ file, sources, forSource, onDone, onCancel }: Props) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(true)
+  const [warn, setWarn] = useState<{ source: Source; picks: number; edits: number } | null>(null)
   const [sheetNames, setSheetNames] = useState<{ name: string; rows: number }[]>([])
   const [sheet, setSheet] = useState('')
   const [info, setInfo] = useState<HeaderInfo>({ headerRow: 0, headerRows: 1 })
@@ -92,7 +94,13 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
     }
   }, [editing, mapping, info, sheet])
 
-  async function load() {
+  async function exportHistory(src: Source) {
+    const { listPicks, getSkuStockInfo } = await import('../../shared/inventory/history.ts')
+    const picks = (await listPicks({ allPeriods: true })).filter((p) => p.source === src.name)
+    await exportRows(buildPickExport(picks, await getSkuStockInfo(picks.map((p) => p.sku))), `lich-su-picking-${src.name}`, 'csv')
+  }
+
+  async function load(confirmed = false) {
     setBusy(true)
     setError('')
     try {
@@ -104,9 +112,10 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
       const result = await excel.extract(sheet, info, mapping)
       if (result.rows.length === 0) throw new Error('Không đọc được dòng nào có SKU. Kiểm tra dòng tiêu đề và cột SKU.')
       const prev = forSource ?? sources.find((s) => s.name === name.trim())
-      if (prev?.loaded_at) {
-        const edited = (await listInventoryEdits(1000)).some((e) => e.source === prev.name && e.at > prev.loaded_at)
-        if (edited && !(await confirmDialog(`Nguồn "${prev.name}" có chỉnh sửa tay sau lần nạp trước. Chỉnh sửa tay sẽ bị thay mới khi nạp lại. Tiếp tục?`, { danger: true, okText: 'Nạp, thay mới' }))) {
+      if (prev?.loaded_at && !confirmed) {
+        const act = await getPeriodActivity(prev)
+        if (act.picks > 0 || act.edits > 0) {
+          setWarn({ source: prev, ...act })
           setBusy(false)
           return
         }
@@ -129,6 +138,19 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
       <h2 className="text-lg font-semibold">Nạp file: {file.name}</h2>
       {error && <Notice kind="error">{error}</Notice>}
       {busy && <Notice>Đang xử lý…</Notice>}
+      {warn && (
+        <Notice kind="error">
+          <p>
+            Nguồn <b>{warn.source.name}</b> (kỳ {warn.source.period}) có <b>{warn.picks}</b> lần lấy và <b>{warn.edits}</b> thao tác
+            sửa/nhập. Nạp file sẽ mở <b>kỳ mới</b>: tồn tính lại từ file, lịch sử cũ được giữ nhưng không tính vào tồn mới.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button onClick={() => exportHistory(warn.source)}>Xuất lịch sử CSV</Button>
+            <Button kind="primary" onClick={() => { setWarn(null); void load(true) }} disabled={busy}>Nạp, mở kỳ mới</Button>
+            <Button onClick={() => setWarn(null)}>Huỷ</Button>
+          </div>
+        </Notice>
+      )}
 
       {recognized && !editing && preview && (
         <div className="space-y-3">
@@ -137,7 +159,7 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
             có SKU, {preview.skippedTotal} dòng tổng). Nạp sẽ <b>thay bản cũ</b> của nguồn này.
           </Notice>
           <div className="flex flex-wrap gap-2">
-            <Button kind="primary" onClick={load} disabled={busy}>Nạp (thay bản cũ)</Button>
+            <Button kind="primary" onClick={() => load()} disabled={busy}>Nạp (thay bản cũ)</Button>
             <Button onClick={() => setEditing(true)}>Chỉnh cột</Button>
             <Button onClick={onCancel}>Huỷ</Button>
           </div>
@@ -244,7 +266,7 @@ export default function ImportWizard({ file, sources, forSource, onDone, onCance
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button kind="primary" onClick={load} disabled={busy || mapping.sku === undefined || !name.trim()}>
+            <Button kind="primary" onClick={() => load()} disabled={busy || mapping.sku === undefined || !name.trim()}>
               Lưu hồ sơ nguồn và nạp
             </Button>
             <Button onClick={onCancel}>Huỷ</Button>

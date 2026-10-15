@@ -172,3 +172,39 @@ export function planLotMigration(input: MigrationInput): MigrationPlan {
   }
   return { counter, assigned, statements: stmts, stats }
 }
+
+// ---------- Nạp file = mở kỳ mới ----------
+
+/** Đếm hoạt động của kỳ hiện tại một nguồn: số lần lấy (picks) và số thao tác sửa/nhập (inventory_edits). */
+export function countPeriodActivity(
+  src: { name: string; period: number; loaded_at: string },
+  picks: { source: string | null; period: number | null; picked_at: string | null }[],
+  edits: { source: string; at: string }[],
+): { picks: number; edits: number } {
+  const inPeriod = (at: string | null) => !!at && at >= src.loaded_at
+  return {
+    picks: picks.filter((p) => p.source === src.name && (p.period == null || p.period === src.period) && inPeriod(p.picked_at)).length,
+    edits: edits.filter((e) => e.source === src.name && inPeriod(e.at)).length,
+  }
+}
+
+/**
+ * Câu SQL nạp lại một nguồn: tăng sources.period (trừ lần nạp đầu của nguồn), xoá dòng cũ, mọi dòng mới nhận lot_id mới
+ * (lot_counter tăng, không tái dùng). picks / inventory_edits cũ giữ nguyên (kỳ cũ, lot_id cũ mồ côi).
+ */
+export function replaceRowsSql(
+  sourceId: number, cols: readonly string[], rows: (string | number | null)[][], meta: { file_name: string; skipped: string },
+): Stmt[] {
+  const insert = `INSERT INTO inventory_rows (source_id,${cols.join(',')},lot_id) VALUES (?,${cols.map(() => '?').join(',')},(SELECT n FROM lot_counter WHERE id = 1))`
+  return [
+    { sql: 'DELETE FROM inventory_rows WHERE source_id = ?', bind: [sourceId] },
+    ...rows.flatMap((r): Stmt[] => [
+      { sql: 'UPDATE lot_counter SET n = n + 1 WHERE id = 1' },
+      { sql: insert, bind: [sourceId, ...r] },
+    ]),
+    {
+      sql: `UPDATE sources SET file_name = ?, skipped = ?, row_count = ?, period = CASE WHEN loaded_at IS NULL OR loaded_at = '' THEN period ELSE period + 1 END, loaded_at = datetime('now', 'localtime') WHERE id = ?`,
+      bind: [meta.file_name, meta.skipped, rows.length, sourceId],
+    },
+  ]
+}

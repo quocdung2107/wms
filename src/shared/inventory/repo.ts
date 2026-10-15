@@ -7,7 +7,7 @@ import { CUSTOMER_FIELDS, customerKey, normalizeCustomer, validateCustomer, type
 import type { EditLog, EditOp, EditPlan } from './edit.ts'
 import { pickOrdersUpgradeSql, picksUpgradeSql } from '../../features/pick-orders/logic.ts'
 import type { ReceivePlan } from './receive.ts'
-import { lotUpgradeSql, planLotMigration } from './lot-migrate.ts'
+import { countPeriodActivity, lotUpgradeSql, planLotMigration, replaceRowsSql } from './lot-migrate.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
 
@@ -22,6 +22,7 @@ export interface Source {
   loaded_at: string
   row_count: number
   skipped: string
+  period: number
 }
 
 export interface SourceInput {
@@ -123,6 +124,7 @@ const toSource =(r: Record<string, unknown>): Source => ({
   loaded_at: (r.loaded_at as string) ?? '',
   row_count: (r.row_count as number) ?? 0,
   skipped: (r.skipped as string) ?? '',
+  period: Number(r.period) || 1,
 })
 
 export async function listSources(): Promise<Source[]> {
@@ -143,19 +145,22 @@ export async function saveSource(s: SourceInput): Promise<number> {
   return row.id as number
 }
 
-/** Nạp file mới thay hoàn toàn dữ liệu cũ của cùng nguồn (không giữ lịch sử). */
+/** Nạp file mới = mở kỳ mới của nguồn: period+1, lot_id mới; picks/sửa cũ giữ nguyên (kỳ cũ). */
 export async function replaceRows(sourceId: number, rows: StdRow[], meta: { file_name: string; skipped: string }) {
   await initSchema()
-  const cols = ['source_id', ...STD_FIELDS]
-  const insert = `INSERT INTO inventory_rows (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
-  await batch([
-    { sql: 'DELETE FROM inventory_rows WHERE source_id = ?', bind: [sourceId] },
-    ...rows.map((r) => ({ sql: insert, bind: [sourceId, ...STD_FIELDS.map((f) => r[f])] })),
-    {
-      sql: `UPDATE sources SET file_name = ?, skipped = ?, row_count = ?, loaded_at = datetime('now', 'localtime') WHERE id = ?`,
-      bind: [meta.file_name, meta.skipped, rows.length, sourceId],
-    },
-  ])
+  await batch(replaceRowsSql(sourceId, STD_FIELDS, rows.map((r) => STD_FIELDS.map((f) => r[f] as string | number | null)), meta))
+}
+
+/** Số lần lấy và số thao tác sửa/nhập của kỳ hiện tại một nguồn (cho cảnh báo trước khi nạp). */
+export async function getPeriodActivity(src: Source): Promise<{ picks: number; edits: number }> {
+  await initSchema()
+  const picks = await query('SELECT source, period, picked_at FROM picks WHERE source = ?', [src.name])
+  const edits = await query('SELECT source, at FROM inventory_edits WHERE source = ?', [src.name])
+  return countPeriodActivity(
+    { name: src.name, period: src.period, loaded_at: src.loaded_at },
+    picks.map((p) => ({ source: p.source as string | null, period: (p.period as number | null) ?? null, picked_at: p.picked_at as string | null })),
+    edits.map((e) => ({ source: String(e.source ?? ''), at: String(e.at ?? '') })),
+  )
 }
 
 /** Nạp file khối lượng: thay hoàn toàn bảng cũ. */
