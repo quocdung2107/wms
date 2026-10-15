@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   sumPicked, sumPickedByLot, estimateStock, skuStockInfo, locKey, nowLocal, dateBounds,
-  buildCountExport, buildPickExport, countKey, latestCounts, assignCounts, type CountSession, type Pick, type PickLike,
+  buildCountExport, buildPickExport, periodLabel, countKey, latestCounts, assignCounts, type CountSession, type Pick, type PickLike,
 } from '../src/shared/inventory/history.ts'
 
 const p = (o: Partial<PickLike> = {}): PickLike =>
@@ -60,8 +60,8 @@ test('buildPickExport: số đơn trống, csvSafe', () => {
   assert.equal(rows[1][8], '')
   assert.equal(rows[1][9], "'-cmd")
   assert.equal(rows[1][7], 2)
-  assert.deepEqual(rows[0].slice(10), ['Tổng hệ thống', 'Tồn ước tính', 'Hold'])
-  assert.deepEqual(rows[1].slice(10), ['', '', ''])
+  assert.deepEqual(rows[0].slice(10), ['Tổng hệ thống', 'Tồn ước tính', 'Hold', 'Ngày SX', 'Lô #', 'Kỳ'])
+  assert.deepEqual(rows[1].slice(10), ['', '', '', '', '', ''])
 })
 
 test('buildPickExport: có info -> 3 cột cuối', () => {
@@ -70,7 +70,7 @@ test('buildPickExport: có info -> 3 cột cuối', () => {
     order_no: null, picked_at: '2026-10-05 10:00:00', note: '',
   }
   const rows = buildPickExport([k], new Map([['S1', { total: 10, picked: 4, estimate: -6, hold: 1 }]]))
-  assert.deepEqual(rows[1].slice(10), [10, -6, 1])
+  assert.deepEqual(rows[1].slice(10, 13), [10, -6, 1])
   assert.equal(rows[1][2], "'=d")
 })
 
@@ -81,12 +81,12 @@ test('buildPickExport: có KL -> 2 cột + dòng tổng, SKU thiếu KL để tr
   })
   const rows = buildPickExport([mk(1, 'a 1', 4), mk(2, 'B2', 3)], undefined, new Map([['A1', 2.5]]))
   assert.equal(rows.length, 4)
-  assert.deepEqual(rows[0].slice(13), ['KL đơn vị (kg)', 'KL dòng (kg)'])
-  assert.deepEqual(rows[1].slice(13), [2.5, 10])
-  assert.deepEqual(rows[2].slice(13), ['', ''])
+  assert.deepEqual(rows[0].slice(16), ['KL đơn vị (kg)', 'KL dòng (kg)'])
+  assert.deepEqual(rows[1].slice(16), [2.5, 10])
+  assert.deepEqual(rows[2].slice(16), ['', ''])
   assert.equal(rows[3][0], 'Tổng khối lượng')
   assert.equal(rows[3][rows[3].length - 1], 10)
-  assert.equal(buildPickExport([mk(1, 'S', 1)])[0].length, 13)
+  assert.equal(buildPickExport([mk(1, 'S', 1)])[0].length, 16)
 })
 
 test('skuStockInfo: nhiều nguồn/vị trí, lẻ cũng hold, trước loaded_at, không tồn, tồn âm', () => {
@@ -159,4 +159,19 @@ test('sumPickedByLot: ca DXS26, 2 lô cùng vị trí+batch tách riêng, bỏ p
   assert.equal(m.get(1), 150)
   assert.equal(m.get(2), undefined)
   assert.equal(m.size, 1)
+})
+
+test('buildPickExport: Ngày SX, Lô #, Kỳ; kỳ cũ có nhãn đã đóng; cần xác nhận', () => {
+  const base: Pick = {
+    id: 1, sku: 'S', description: '', source: 'A', location: 'L', batch_no: 'B', uom: '', qty: 2,
+    order_no: null, picked_at: '2026-10-05 10:00:00', note: '',
+  }
+  const rows = buildPickExport([
+    { ...base, lot_id: 7, manuf_date: '2026-10-12', period: 2, closed: false },
+    { ...base, id: 2, lot_id: null, manuf_date: '', period: 1, closed: true, needs_review: true },
+  ])
+  assert.deepEqual(rows[1].slice(13), ['2026-10-12', 7, 'kỳ 2'])
+  assert.deepEqual(rows[2].slice(13), ['', '', 'kỳ 1 (đã đóng) - cần xác nhận'])
+  assert.equal(periodLabel(null), '')
+  assert.equal(periodLabel(3, true), 'kỳ 3 (đã đóng)')
 })

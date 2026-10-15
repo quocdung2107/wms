@@ -38,13 +38,22 @@ export interface Pick {
   pick_order_id?: number | null
   /** Lô tồn (inventory_rows.lot_id) mà lần lấy trừ vào; null/thiếu = chưa rõ lô. */
   lot_id?: number | null
+  /** Ngày SX của lô (JOIN inventory_rows theo lot_id); rỗng nếu lô không còn (kỳ cũ) hoặc chưa rõ lô. */
+  manuf_date?: string
+  /** Kỳ của lần lấy (null = chưa chuyển đổi). */
+  period?: number | null
+  /** true khi kỳ của lần lấy khác kỳ hiện tại của nguồn. */
+  closed?: boolean
+  /** Pick tự gán lô lúc nâng cấp, cần người dùng xác nhận. */
+  needs_review?: boolean
 }
 
 export type PickInput = Omit<Pick, 'id'>
 
-export type PickEdit = { qty: number; location: string; batch_no: string; note: string; picked_at: string }
+/** lot_id (tuỳ chọn): có thì đổi lô và xoá dấu "cần xác nhận"; không truyền thì giữ nguyên. */
+export type PickEdit = { qty: number; location: string; batch_no: string; note: string; picked_at: string; lot_id?: number | null }
 
-export interface HistoryFilter { sku?: string; from?: string; to?: string; pickOrderId?: number } // from/to: YYYY-MM-DD
+export interface HistoryFilter { sku?: string; from?: string; to?: string; pickOrderId?: number; allPeriods?: boolean } // from/to: YYYY-MM-DD
 
 // ---------- hàm thuần ----------
 
@@ -172,13 +181,17 @@ export function skuStockInfo(
   return out
 }
 
+/** Nhãn kỳ: 'kỳ N' hoặc 'kỳ N (đã đóng)'; chưa có kỳ -> rỗng. */
+export const periodLabel = (period: number | null | undefined, closed?: boolean) =>
+  period == null ? '' : `kỳ ${period}${closed ? ' (đã đóng)' : ''}`
+
 /** Điều kiện lọc ngày theo ngày địa phương: [from 00:00:00, to 23:59:59]. */
 export function dateBounds(f: HistoryFilter): { from: string | null; to: string | null } {
   return { from: f.from ? `${f.from} 00:00:00` : null, to: f.to ? `${f.to} 23:59:59` : null }
 }
 
 export const COUNT_EXPORT_HEADER = ['Giờ kiểm', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Tồn hệ thống', 'Tổng đếm', 'Lệch', 'Phép tính', 'Ghi chú']
-export const PICK_EXPORT_HEADER = ['Giờ lấy', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Số lượng', 'Số đơn', 'Ghi chú', 'Tổng hệ thống', 'Tồn ước tính', 'Hold']
+export const PICK_EXPORT_HEADER = ['Giờ lấy', 'SKU', 'Mô tả', 'Nguồn', 'Vị trí', 'Batch', 'ĐVT', 'Số lượng', 'Số đơn', 'Ghi chú', 'Tổng hệ thống', 'Tồn ước tính', 'Hold', 'Ngày SX', 'Lô #', 'Kỳ']
 
 const safeRow = (cells: Cell[]): Cell[] => cells.map(csvSafe)
 
@@ -211,6 +224,7 @@ export function buildPickExport(picks: Pick[], info?: Map<string, SkuStockInfo>,
     const cells: Cell[] = [
       p.picked_at, p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no ?? '', p.note,
       i ? i.total : '', i ? i.estimate : '', i ? i.hold : '',
+      p.manuf_date ?? '', p.lot_id ?? '', periodLabel(p.period, p.closed) + (p.needs_review ? ' - cần xác nhận' : ''),
     ]
     if (weights) {
       const kg = weights.get(skuKey(p.sku.replace(/\s+/g, '')))
@@ -313,13 +327,25 @@ export async function getLinesFor(sessionIds: number[]): Promise<Record<number, 
 export async function listPicks(f: HistoryFilter = {}): Promise<Pick[]> {
   const { query } = await db()
   const w = where('picked_at', f)
-  const rows = await query(`SELECT * FROM picks ${w.sql} ORDER BY picked_at DESC, id DESC`, w.bind)
+  const cur = '(SELECT period FROM sources WHERE name = picks.source)'
+  let sql = w.sql
+  if (!f.allPeriods && f.pickOrderId === undefined) {
+    const cond = `(period IS NULL OR period = ${cur})`
+    sql = sql ? `${sql} AND ${cond}` : `WHERE ${cond}`
+  }
+  const rows = await query(
+    `SELECT picks.*, (SELECT manuf_date FROM inventory_rows WHERE lot_id = picks.lot_id LIMIT 1) AS lot_manuf, ${cur} AS cur_period
+     FROM picks ${sql} ORDER BY picked_at DESC, id DESC`, w.bind)
   return rows.map((r) => ({
     id: r.id as number, sku: str(r.sku), description: str(r.description), source: str(r.source),
     location: str(r.location), batch_no: str(r.batch_no), uom: str(r.uom), qty: (r.qty as number) ?? 0,
     order_no: r.order_no == null ? null : String(r.order_no), picked_at: str(r.picked_at), note: str(r.note),
     pick_order_id: r.pick_order_id == null ? null : (r.pick_order_id as number),
     lot_id: r.lot_id == null ? null : (r.lot_id as number),
+    manuf_date: str(r.lot_manuf),
+    period: r.period == null ? null : (r.period as number),
+    closed: r.period != null && r.cur_period != null && r.period !== r.cur_period,
+    needs_review: Number(r.needs_review) === 1,
   }))
 }
 
@@ -327,6 +353,13 @@ export async function listPicks(f: HistoryFilter = {}): Promise<Pick[]> {
 export async function updatePick(id: number, p: PickEdit): Promise<void> {
   if (!(p.qty > 0)) throw new Error('Số lượng phải lớn hơn 0')
   const { query } = await db()
+  if (p.lot_id !== undefined) {
+    await query(
+      'UPDATE picks SET qty = ?, location = ?, batch_no = ?, note = ?, picked_at = ?, lot_id = ?, needs_review = 0 WHERE id = ?',
+      [p.qty, p.location, p.batch_no, p.note, p.picked_at, p.lot_id, id],
+    )
+    return
+  }
   await query(
     'UPDATE picks SET qty = ?, location = ?, batch_no = ?, note = ?, picked_at = ? WHERE id = ?',
     [p.qty, p.location, p.batch_no, p.note, p.picked_at, id],

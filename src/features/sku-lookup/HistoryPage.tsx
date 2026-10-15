@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import {
-  buildCountExport, buildPickExport, deleteCount, deletePick, getCountLines, getLinesFor, getSkuStockInfo, listCounts, skuKey, listPicks,
-  type CountLine,
+  buildCountExport, buildPickExport, deleteCount, deletePick, getCountLines, getLinesFor, getSkuStockInfo, listCounts, skuKey, listPicks, periodLabel, updatePick,
+  type CountLine, type Pick,
 } from '../../shared/inventory/history.ts'
 import { attachPick, detachPick, listPickOrders } from '../pick-orders/api.ts'
+import { getRowsBySku, type SkuRow } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
 import { Button, Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
@@ -19,12 +20,29 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
   const [open, setOpen] = useState<number | null>(null)
   const [lines, setLines] = useState<CountLine[]>([])
   const [err, setErr] = useState('')
-  const filter = { sku, from, to }
-  const key = [sku, from, to]
+  const [allPeriods, setAllPeriods] = useState(false)
+  const filter = { sku, from, to, allPeriods }
+  const key = [sku, from, to, allPeriods]
   const counts = useLoad(() => listCounts(filter), key)
   const picks = useLoad(() => listPicks(filter), key)
   const orders = useLoad(() => listPickOrders(), [])
   const [attach, setAttach] = useState<number | null>(null)
+  const [relot, setRelot] = useState<{ pick: Pick; lots: SkuRow[] } | null>(null)
+
+  async function openRelot(p: Pick) {
+    try { setRelot({ pick: p, lots: (await getRowsBySku(p.sku)).filter((r) => r.lot_id != null) }) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+  }
+
+  async function doRelot(r: SkuRow) {
+    if (!relot) return
+    const p = relot.pick
+    try {
+      await updatePick(p.id, { qty: p.qty, location: r.location ?? '', batch_no: r.batch_no ?? '', note: p.note, picked_at: p.picked_at, lot_id: r.lot_id })
+      setErr(''); setRelot(null); picks.reload()
+    } catch (e) {
+      setRelot(null); setErr(e instanceof Error ? e.message : String(e))
+    }
+  }
   const pickSkus = [...new Set((picks.data ?? []).map((p) => p.sku))].sort()
   const info = useLoad(() => getSkuStockInfo(pickSkus), [pickSkus.join('|'), picks.data?.length ?? 0])
 
@@ -91,6 +109,11 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
         <input className={inputClass} type="date" value={from} aria-label="Từ ngày" onChange={(e) => setFrom(e.target.value)} />
         <input className={inputClass} type="date" value={to} aria-label="Đến ngày" onChange={(e) => setTo(e.target.value)} />
       </div>
+      {tab === 'pick' && (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={allPeriods} onChange={(e) => setAllPeriods(e.target.checked)} /> Hiện cả các kỳ cũ (đã đóng)
+        </label>
+      )}
       <div className="flex gap-2">
         <Button disabled={empty} onClick={() => doExport('xlsx')}>Xuất Excel</Button>
         <Button disabled={empty} onClick={() => doExport('csv')}>Xuất CSV</Button>
@@ -128,6 +151,10 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
             <p className="text-lg font-bold">{p.sku} <span className="text-base font-normal">· {p.location || '—'}{p.batch_no ? ` · ${p.batch_no}` : ''}</span></p>
             <p className="text-sm text-slate-600">{p.description}</p>
             <p>Lấy <b>{fmtQty(p.qty)}</b> {p.uom}{p.order_no ? ` · Đơn ${p.order_no}` : ''}</p>
+            <p className="text-sm text-slate-600">
+              Ngày SX {p.manuf_date || '—'} · Lô # {p.lot_id ?? '—'}{p.period != null ? ` · ${periodLabel(p.period, p.closed)}` : ''}
+              {p.needs_review && <b className="text-amber-700"> · cần xác nhận</b>}
+            </p>
             {i && (
               <p className="text-sm text-slate-600">Tổng hệ thống <b>{fmtQty(i.total)}</b> · Tồn ước tính{' '}
                 <b className={i.estimate < 0 ? 'text-red-700' : ''}>{fmtQty(i.estimate)}</b> · Hold <b>{fmtQty(i.hold)}</b> {p.uom} (tồn hiện tại)</p>
@@ -140,12 +167,32 @@ export default function HistoryPage({ onBack }: { onBack: () => void }) {
               {p.pick_order_id == null
                 ? <Button className="flex-1" onClick={() => setAttach(p.id)}>Gắn vào PK</Button>
                 : <Button className="flex-1" onClick={() => detach(p.id)}>Gỡ khỏi PK</Button>}
+              {!p.closed && <Button className="flex-1" onClick={() => openRelot(p)}>{p.needs_review ? 'Xác nhận lô' : 'Đổi lô'}</Button>}
               <Button kind="danger" onClick={() => remove('pick', p.id)}>Xoá</Button>
             </div>
           </Card>
           )
         })}
       </div>
+      {relot && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Chọn lô">
+          <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto rounded-b-2xl bg-white p-4 md:rounded-2xl">
+            <h2 className="text-xl font-bold">Chọn lô cho {relot.pick.sku}</h2>
+            {relot.lots.length === 0 && <p className="text-slate-600">SKU này không còn lô nào trong tồn hiện tại.</p>}
+            <ul className="divide-y rounded-lg border border-slate-200">
+              {relot.lots.map((r) => (
+                <li key={r.lot_id}>
+                  <button type="button" className="block min-h-11 w-full px-3 py-2 text-left" onClick={() => doRelot(r)}>
+                    <b>{r.location || '—'}</b> · {r.batch_no || '—'} · SX {r.manuf_date || '—'} · Lô # {r.lot_id}
+                    {r.lot_id === relot.pick.lot_id ? ' (hiện tại)' : ''}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <Button className="w-full" onClick={() => setRelot(null)}>Huỷ</Button>
+          </div>
+        </div>
+      )}
       {attach !== null && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 md:items-center" role="dialog" aria-modal="true" aria-label="Chọn PK">
           <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto rounded-b-2xl bg-white p-4 md:rounded-2xl">
