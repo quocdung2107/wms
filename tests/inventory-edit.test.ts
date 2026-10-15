@@ -1,15 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { planEdit, planMove, planSplit, planMerge, rowEstimate, normDate, type EditRow, type EditOp, type EditPlan, type PickedMap } from '../src/shared/inventory/edit.ts'
-import { locKey } from '../src/shared/inventory/history.ts'
 
 let nid = 1
 const row = (o: Partial<EditRow> = {}): EditRow => ({
-  id: nid++, source_id: 1, source: 'A', warehouse: 'W', location: 'L1', sku: 'S1', description: 'd', category: 'c', uom_raw: 'PCS',
+  id: nid, lot_id: nid++, source_id: 1, source: 'A', warehouse: 'W', location: 'L1', sku: 'S1', description: 'd', category: 'c', uom_raw: 'PCS',
   qty_system: 100, qty_available: null, qty_damaged: null, qty_hold: null, condition: 'OK', batch_no: 'B1', lot_no: '',
   manuf_date: '2026-01-01', receive_date: '', expiry_date: '', ...o,
 })
-const pk = (...e: [string, string, string, number][]): PickedMap => new Map(e.map(([s, l, b, n]) => [locKey(s, l, b), n]))
+const pk = (...e: [number, number][]): PickedMap => new Map(e) // lot_id -> đã lấy
 
 /** Mô phỏng áp ops lên danh sách dòng. */
 function apply(rows: EditRow[], ops: EditOp[]): EditRow[] {
@@ -32,32 +31,32 @@ test('normDate', () => {
   assert.equal(normDate('abc'), null)
 })
 
-test('AC-1 sửa: ước tính không đổi dù đã lấy theo khoá cũ', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 30])
+test('AC-1 sửa: ước tính không đổi, qty_system không đổi vì picks đi theo lot_id', () => {
+  const r = row({ lot_id: 1 }); const p = pk([1, 30])
   const plan = okPlan(planEdit(r, { location: 'L9', batch_no: 'B9', manuf_date: '02/02/2026' }, p))
   const after = apply([r], plan.ops)
   assert.equal(after[0].location, 'L9')
   assert.equal(after[0].manuf_date, '2026-02-02')
-  assert.equal(after[0].qty_system, 70)
+  assert.equal(after[0].qty_system, 100)
   assert.equal(rowEstimate(after[0], p), 70)
   assert.equal(plan.log.kind, 'edit')
 })
 
 test('AC-1 sửa: chỉ đổi ngày SX giữ nguyên khoá -> qty_system giữ; ngày sai bị từ chối', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 30])
+  const r = row({ lot_id: 1 }); const p = pk([1, 30])
   const plan = okPlan(planEdit(r, { location: 'L1', batch_no: 'B1', manuf_date: '2026-05-05' }, p))
   assert.equal(apply([r], plan.ops)[0].qty_system, 100)
   assert.equal(planEdit(r, { location: 'L1', batch_no: 'B1', manuf_date: 'xx' }, p).ok, false)
 })
 
-test('AC-1 sửa sang khoá đã có picks: ước tính vẫn giữ', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 30], ['A', 'L2', 'B1', 5])
+test('AC-1 sửa sang vị trí trùng lô khác có picks: ước tính vẫn giữ, không dính picks lô kia', () => {
+  const r = row({ lot_id: 1 }); const p = pk([1, 30], [2, 5])
   const after = apply([r], okPlan(planEdit(r, { location: 'L2', batch_no: 'B1', manuf_date: '' }, p)).ops)
   assert.equal(rowEstimate(after[0], p), 70)
 })
 
 test('AC-2 di chuyển một phần sang Location mới: tạo dòng, tổng không đổi', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 20])
+  const r = row({ lot_id: 1 }); const p = pk([1, 20])
   const plan = okPlan(planMove(r, 30, 'L2', [r], p))
   const after = apply([r], plan.ops)
   assert.equal(after.length, 2)
@@ -83,7 +82,7 @@ test('AC-2 khác Ngày SX hoặc khác nguồn thì không cộng vào dòng đ�
 })
 
 test('AC-2 di chuyển hết: xoá dòng nguồn; vượt tồn / <=0 / cùng Location bị từ chối', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 20])
+  const r = row({ lot_id: 1 }); const p = pk([1, 20])
   const after = apply([r], okPlan(planMove(r, 80, 'L2', [r], p)).ops)
   assert.equal(after.length, 1)
   assert.equal(after[0].location, 'L2')
@@ -95,7 +94,7 @@ test('AC-2 di chuyển hết: xoá dòng nguồn; vượt tồn / <=0 / cùng Lo
 })
 
 test('AC-3 tách: tổng phần = ước tính, mỗi phần > 0', () => {
-  const r = row(); const p = pk(['A', 'L1', 'B1', 40])
+  const r = row({ lot_id: 1 }); const p = pk([1, 40])
   const parts = [
     { location: 'L1', batch_no: 'B1', manuf_date: '2026-01-01', qty: 25 },
     { location: 'L2', batch_no: 'B1', manuf_date: '2026-01-01', qty: 35 },
@@ -120,13 +119,14 @@ test('AC-3 tách: tổng sai / phần <= 0 / chỉ 1 phần / trùng khoá bị 
 })
 
 test('AC-4 gộp: cùng nguồn/SKU/ngày SX/batch, tổng ước tính, xoá dòng thừa', () => {
-  const a = row(); const b = row({ location: 'L2', qty_system: 50 }); const c = row({ location: 'L3', qty_system: 7 })
-  const p = pk(['A', 'L1', 'B1', 10], ['A', 'L3', 'B1', 2])
+  const a = row({ lot_id: 1 }); const b = row({ location: 'L2', qty_system: 50, lot_id: 2 }); const c = row({ location: 'L3', qty_system: 7, lot_id: 3 })
+  const p = pk([1, 10], [3, 2])
   const plan = okPlan(planMerge([a, b, c], 'L2', p))
   const after = apply([a, b, c], plan.ops)
   assert.equal(after.length, 1)
   assert.equal(after[0].location, 'L2')
-  assert.equal(rowEstimate(after[0], p), 90 + 50 + 5)
+  // picks của lô 2, 3 được chuyển sang lô 1 (repoint_picks)
+  assert.equal(rowEstimate(after[0], pk([1, 12])), 90 + 50 + 5)
   assert.equal(plan.log.before.length, 3)
 })
 
@@ -182,4 +182,15 @@ test('AC-3 lot_id: hai lô trùng hoàn toàn vẫn giữ riêng (không tự g�
   const a = row({ lot_id: 1 }); const b = row({ lot_id: 2 }); const p = pk()
   const out = apply([a, b], okPlan(planEdit(a, { location: 'L1', batch_no: 'B1', manuf_date: '2026-01-01' }, p)).ops)
   assert.deepEqual(out.map((x) => x.lot_id), [1, 2])
+})
+
+test('AC-5 ca DXS26: hai lô cùng vị trí+batch khác Ngày SX, Đã lấy tính riêng theo lot_id', () => {
+  const a = row({ lot_id: 1, qty_system: 200, manuf_date: '2026-10-12' }); const b = row({ lot_id: 2, qty_system: 100, manuf_date: '2026-10-13' })
+  const p = pk([1, 150])
+  assert.equal(rowEstimate(a, p), 50)
+  assert.equal(rowEstimate(b, p), 100)
+  const plan = okPlan(planEdit(b, { location: 'L1', batch_no: 'B1', manuf_date: '2026-10-12' }, p))
+  const after = apply([a, b], plan.ops)
+  assert.equal(rowEstimate(after[0], p), 50)
+  assert.equal(rowEstimate(after[1], p), 100)
 })

@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { planReceive, type ReceiveLine, type ReceivePlan } from '../src/shared/inventory/receive.ts'
 import { rowEstimate, type EditRow, type EditOp, type PickedMap } from '../src/shared/inventory/edit.ts'
-import { locKey } from '../src/shared/inventory/history.ts'
 
 let nid = 1
 const row = (o: Partial<EditRow> = {}): EditRow => ({
@@ -12,8 +11,7 @@ const row = (o: Partial<EditRow> = {}): EditRow => ({
 })
 const line = (o: Partial<ReceiveLine> = {}): ReceiveLine => ({ sku: 'S1', qty: 10, location: 'L1', batch_no: 'B1', manuf_date: '2026-01-01', ...o })
 const src = { id: 1, name: 'A' }
-const pk = (sku: string, ...e: [string, string, number][]) =>
-  new Map<string, PickedMap>([[sku.toUpperCase(), new Map(e.map(([l, b, n]) => [locKey('A', l, b), n]))]])
+const pk = (sku: string, ...e: [number, number][]) => new Map<string, PickedMap>([[sku.toUpperCase(), new Map(e)]]) // lot_id -> đã lấy
 const okPlan = (p: ReceivePlan) => { assert.ok(p.ok, p.ok ? '' : p.error); return p as Extract<ReceivePlan, { ok: true }> }
 const errOf = (p: ReceivePlan) => { assert.equal(p.ok, false); return (p as { error: string }).error }
 
@@ -78,8 +76,8 @@ test('AC-2 SKU đã có lấy mô tả/ĐVT/kho từ dòng sẵn có', () => {
 })
 
 test('AC-3 tồn ước tính tăng đúng bằng SL nhập khi đã có picked', () => {
-  const r = row()
-  const p = pk('S1', ['L1', 'B1', 30], ['L2', 'B1', 7])
+  const r = row({ lot_id: 1 })
+  const p = pk('S1', [1, 30], [2, 7])
   const m = p.get('S1')!
   const before = rowEstimate(r, m)
   const plan = okPlan(planReceive(src, [line({ qty: 10 }), line({ location: 'L2', qty: 4 })], [r], p))
@@ -87,7 +85,7 @@ test('AC-3 tồn ước tính tăng đúng bằng SL nhập khi đã có picked'
   assert.equal(rowEstimate(after[0], m), before + 10)
   assert.equal(after[0].qty_system, 110)
   assert.equal(rowEstimate(after[1], m), 4)
-  assert.equal(after[1].qty_system, 11)
+  assert.equal(after[1].qty_system, 4) // lô mới chưa có picks
 })
 
 test('AC-4 lot_id: khớp thì giữ lot_id lô có sẵn; không khớp thì lot mới; hai lô trùng giữ riêng', () => {

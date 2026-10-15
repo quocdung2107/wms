@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
 import { readWorkbook } from '../src/shared/excel/reader.ts'
 import {
-  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql, weighLines, pickOrdersUpgradeSql, planAttach,
+  formatPkCode, lineProgress, mergeLines, normOrderRef, parsePickSheet, pickedBySku, picksUpgradeSql, weighLines, pickOrdersUpgradeSql, planAttach, allocPicked,
 } from '../src/features/pick-orders/logic.ts'
 
 test('formatPkCode: PK-0001, tăng dần, quá 4 chữ số vẫn đúng', () => {
@@ -107,4 +107,46 @@ test('planAttach: 3 trường hợp', () => {
   const r = planAttach([], pick, false)
   assert.equal(r.ok, false)
   if (!r.ok) assert.match(r.error, /chưa bật cho phép gắn thẻ SKU/)
+})
+
+test('mergeLines: gộp theo (SKU, Batch, Ngày SX)', () => {
+  const m = mergeLines([
+    { sku: 'A1', description: '', uom: '', qty_need: 2, batch_no: 'b1', manuf_date: '2026-01-01' },
+    { sku: 'a1', description: '', uom: '', qty_need: 3, batch_no: 'B1', manuf_date: '2026-01-01' },
+    { sku: 'A1', description: '', uom: '', qty_need: 4, batch_no: 'B1', manuf_date: '2026-02-01' },
+    { sku: 'A1', description: '', uom: '', qty_need: 1 },
+  ])
+  assert.deepEqual(m.map((l) => l.qty_need), [5, 4, 1])
+})
+
+test('parsePickSheet: cột Batch và Ngày SX (alias), ngày sai báo lỗi theo dòng', () => {
+  const r = parsePickSheet(sheetFrom([
+    ['SKU', 'Số lượng', 'Batch', 'Ngày SX'],
+    ['A1', 5, 'B1', '12/10/2026'],
+    ['A1', 2, 'B1', '2026-10-12'],
+    ['A1', 3, 'B1', '13/10/2026'],
+    ['A1', 4, 'B1', '31/02/2026'],
+    ['C3', 1, '', ''],
+  ]))
+  assert.deepEqual(r.lines.map((l) => [l.sku, l.batch_no, l.manuf_date, l.qty_need]), [
+    ['A1', 'B1', '2026-10-12', 7], ['A1', 'B1', '2026-10-13', 3], ['C3', '', '', 1],
+  ])
+  assert.equal(r.errors.length, 1)
+  assert.equal(r.errors[0].row, 5)
+  assert.match(r.errors[0].message, /Ngày SX/)
+})
+
+test('parsePickSheet: file không có cột Batch/Ngày SX chạy như cũ', () => {
+  const r = parsePickSheet(sheetFrom([['SKU', 'Số lượng'], ['A1', 1]]))
+  assert.deepEqual(r.lines, [{ sku: 'A1', qty_need: 1, description: '', uom: '' }])
+})
+
+test('allocPicked: chia theo SKU, dòng có lô trước, dư dồn dòng đầu', () => {
+  const lines = [
+    { sku: 'A', qty_need: 10 },
+    { sku: 'A', qty_need: 6, batch_no: 'B1' },
+    { sku: 'B', qty_need: 5 },
+  ]
+  assert.deepEqual(allocPicked(lines, new Map([['A', 9], ['B', 7]])), [3, 6, 7])
+  assert.deepEqual(allocPicked(lines, new Map()), [0, 0, 0])
 })

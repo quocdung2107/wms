@@ -2,7 +2,7 @@
 import { batch, query } from '../../shared/db/client.ts'
 import { nowLocal, type Pick } from '../../shared/inventory/history.ts'
 import { initSchema } from '../../shared/inventory/repo.ts'
-import { mergeLines, normOrderRef, planAttach, type PickLine } from './logic.ts'
+import { lineKey, mergeLines, normOrderRef, planAttach, type PickLine } from './logic.ts'
 
 export interface PickOrder {
   id: number
@@ -81,19 +81,20 @@ export async function listLines(orderId: number): Promise<PickOrderLine[]> {
   await initSchema()
   return (await query('SELECT * FROM pick_order_lines WHERE pick_order_id = ? ORDER BY id', [orderId])).map((r) => ({
     id: r.id as number, sku: str(r.sku), description: str(r.description), uom: str(r.uom), qty_need: (r.qty_need as number) ?? 0,
+    batch_no: str(r.batch_no), manuf_date: str(r.manuf_date),
   }))
 }
 
-/** Thêm dòng; SKU đã có trong đơn thì cộng dồn số cần. */
+/** Thêm dòng; (SKU, Batch, Ngày SX) đã có trong đơn thì cộng dồn số cần. */
 export async function addLines(orderId: number, lines: PickLine[]): Promise<void> {
   await initSchema()
   const existing = await listLines(orderId)
-  const byKey = new Map(existing.map((l) => [l.sku.toUpperCase(), l]))
+  const byKey = new Map(existing.map((l) => [lineKey(l), l]))
   const stmts = []
   for (const l of mergeLines(lines)) {
-    const cur = byKey.get(l.sku.toUpperCase())
+    const cur = byKey.get(lineKey(l))
     if (cur) stmts.push({ sql: 'UPDATE pick_order_lines SET qty_need = qty_need + ? WHERE id = ?', bind: [l.qty_need, cur.id] })
-    else stmts.push({ sql: 'INSERT INTO pick_order_lines (pick_order_id, sku, description, uom, qty_need) VALUES (?,?,?,?,?)', bind: [orderId, l.sku, l.description, l.uom, l.qty_need] })
+    else stmts.push({ sql: 'INSERT INTO pick_order_lines (pick_order_id, sku, description, uom, qty_need, batch_no, manuf_date) VALUES (?,?,?,?,?,?,?)', bind: [orderId, l.sku, l.description, l.uom, l.qty_need, l.batch_no ?? '', l.manuf_date ?? ''] })
   }
   if (stmts.length) await batch(stmts)
 }
@@ -114,6 +115,7 @@ export async function listOrderPicks(orderId: number): Promise<Pick[]> {
     location: str(r.location), batch_no: str(r.batch_no), uom: str(r.uom), qty: (r.qty as number) ?? 0,
     order_no: r.order_no == null ? null : String(r.order_no), picked_at: str(r.picked_at), note: str(r.note),
     pick_order_id: orderId,
+    lot_id: r.lot_id == null ? null : (r.lot_id as number),
   }))
 }
 
@@ -137,7 +139,7 @@ export async function attachPick(pickId: number, orderId: number): Promise<void>
   const stmts = [{ sql: 'UPDATE picks SET pick_order_id = ? WHERE id = ? AND pick_order_id IS NULL', bind: [orderId, pickId] as (string | number | null)[] }]
   if (plan.addLine) {
     const l = plan.addLine
-    stmts.push({ sql: 'INSERT INTO pick_order_lines (pick_order_id, sku, description, uom, qty_need) VALUES (?,?,?,?,?)', bind: [orderId, l.sku, l.description, l.uom, l.qty_need] })
+    stmts.push({ sql: 'INSERT INTO pick_order_lines (pick_order_id, sku, description, uom, qty_need, batch_no, manuf_date) VALUES (?,?,?,?,?,?,?)', bind: [orderId, l.sku, l.description, l.uom, l.qty_need, '', ''] })
   }
   await batch(stmts)
 }

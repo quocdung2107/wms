@@ -65,8 +65,26 @@ test('chia nhiều dòng và thiếu hàng', () => {
   assert.equal(s.missing, 6)
 })
 
-test('trừ đã lấy theo khoá', () => {
-  const a = row({ qty_system: 10, location: 'A1', manuf_date: '2024-01-01' })
-  const picked = new Map([['S||A1||', 0]])
-  assert.equal(suggestPick([a], 5, picked).items[0].qty, 5)
+test('trừ đã lấy theo lot_id (AC-8): hai lô cùng vị trí+batch khác Ngày SX', () => {
+  const a = row({ qty_system: 200, lot_id: 1, location: 'A1', batch_no: 'B', manuf_date: '2024-01-01' })
+  const b = row({ qty_system: 100, lot_id: 2, location: 'A1', batch_no: 'B', manuf_date: '2024-02-01' })
+  const picked = new Map([[1, 150]])
+  const r = suggestPick([a, b], 120, picked)
+  assert.deepEqual(r.items.map((i) => [i.row.lot_id, i.qty]), [[1, 50], [2, 70]])
+  assert.equal(r.missing, 0)
+})
+
+test('dòng PK có Batch/Ngày SX chỉ xét lô khớp, hết lô thì báo thiếu (Q5)', () => {
+  const a = row({ qty_system: 10, lot_id: 1, batch_no: 'B1', manuf_date: '2024-01-01' })
+  const b = row({ qty_system: 10, lot_id: 2, batch_no: 'B1', manuf_date: '2024-02-01' })
+  const c = row({ qty_system: 10, lot_id: 3, batch_no: 'B2', manuf_date: '2024-02-01' })
+  const rows = [a, b, c]
+  assert.deepEqual(suggestPick(rows, 5, new Map(), { batch_no: 'b1', manuf_date: '' }).items.map((i) => i.row.lot_id), [1])
+  assert.deepEqual(suggestPick(rows, 5, new Map(), { batch_no: '', manuf_date: '01/02/2024' }).items.map((i) => i.row.lot_id), [2])
+  const r = suggestPick(rows, 25, new Map([[2, 10]]), { batch_no: 'B1', manuf_date: '2024-02-01' })
+  assert.deepEqual(r.items.map((i) => i.row.lot_id), [])
+  assert.equal(r.missing, 25)
+  const r2 = suggestPick(rows, 25, new Map(), { batch_no: 'B1' })
+  assert.equal(r2.items.length, 2)
+  assert.equal(r2.missing, 5)
 })

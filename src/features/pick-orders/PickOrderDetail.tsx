@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PickForm, { fromInputDt, toInputDt, type LocTarget } from '../sku-lookup/PickForm.tsx'
-import { buildPickExport, deletePick, getPickedByLot, getPickedBySku, getSkuStockInfo, locKey, nowLocal, savePick, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
+import { buildPickExport, deletePick, getPickedByLot, getSkuStockInfo, nowLocal, savePick, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
 import { getRowsBySku, getSkuWeights, getUomMap, listCustomers, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
@@ -11,9 +11,9 @@ import {
   addLines, deleteLine, deletePickOrder, getPickOrder, listLines, listOrderPicks, setAllowSkuTag, setCustomerCode, setLineNeed, setOrderRef,
   type PickOrderLine,
 } from './api.ts'
-import { fmtKg, lineProgress, weighLines, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
+import { allocPicked, fmtKg, lineProgress, weighLines, parsePickSheet, pickedBySku, type LineError } from './logic.ts'
 import { confirmDialog, promptNumber } from '../../shared/ui/Dialog'
-import { suggestPick, type SuggestItem } from './suggest.ts'
+import { matchesWant, suggestPick, type SuggestItem } from './suggest.ts'
 
 type AutoLine = { line: PickOrderLine; items: SuggestItem[]; missing: number }
 
@@ -48,9 +48,10 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
 
   const done = useMemo(() => pickedBySku(picks.data ?? []), [picks.data])
   const o = order.data
+  const alloc = useMemo(() => allocPicked(lines.data ?? [], done), [lines.data, done])
   const weighed = useMemo(
-    () => weighLines((lines.data ?? []).map((l) => ({ sku: l.sku, qty: done.get(l.sku.toUpperCase()) ?? 0 })), weights.data ?? new Map()),
-    [lines.data, done, weights.data],
+    () => weighLines((lines.data ?? []).map((l, i) => ({ sku: l.sku, qty: alloc[i] })), weights.data ?? new Map()),
+    [lines.data, alloc, weights.data],
   )
   const fail = (e: unknown) => setErr(e instanceof Error ? e.message : String(e))
   const reloadAll = () => { lines.reload(); picks.reload() }
@@ -100,13 +101,14 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
     try {
       const [rows, map, picked] = await Promise.all([getRowsBySku(line.sku), getUomMap(), getPickedByLot(line.sku)])
       const uomOf = makeUomLabeler(map)
-      const choices: LocTarget[] = rows.map((r) => ({
+      const choices: LocTarget[] = rows.filter((r) => matchesWant(r, line)).map((r) => ({
         sku: line.sku, description: line.description || r.description || '', source: r.source, location: r.location ?? '',
         batch_no: r.batch_no ?? '', uom: line.uom || uomOf(r.uom_raw), qtySystem: r.qty_system,
         picked: (r.lot_id != null ? picked.get(r.lot_id) : undefined) ?? 0,
         lot_id: r.lot_id ?? null, manuf_date: r.manuf_date ?? '',
       }))
       const target: LocTarget = { sku: line.sku, description: line.description, source: '', location: '', batch_no: '', uom: line.uom, qtySystem: null, picked: 0, lot_id: null, manuf_date: '' }
+      if (choices.length === 0) return setErr(`Không có lô nào của ${line.sku} khớp Batch/Ngày SX của dòng này`)
       setForm({ line, target, choices })
     } catch (e) { fail(e) }
   }
@@ -114,22 +116,29 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
   async function previewAuto() {
     setErr(''); setMsg('')
     try {
-      const out: AutoLine[] = []
-      const pickedCache = new Map<string, Map<string, number>>()
-      for (const l of lines.data ?? []) {
-        const need = Math.round((l.qty_need - (done.get(l.sku.toUpperCase()) ?? 0)) * 1e6) / 1e6
+      const data = lines.data ?? []
+      const results: (AutoLine | null)[] = data.map(() => null)
+      const pickedCache = new Map<string, Map<number, number>>()
+      const rowsCache = new Map<string, Awaited<ReturnType<typeof getRowsBySku>>>()
+      // Dòng có Batch/Ngày SX xét trước để giữ đúng lô của nó; kết quả vẫn theo thứ tự dòng.
+      const order = data.map((_, i) => i).sort((a, b) => Number(!!(data[b].batch_no || data[b].manuf_date)) - Number(!!(data[a].batch_no || data[a].manuf_date)) || a - b)
+      for (const i of order) {
+        const l = data[i]
+        const need = Math.round((l.qty_need - alloc[i]) * 1e6) / 1e6
         if (need <= 0) continue
         const key = l.sku.toUpperCase()
         let picked = pickedCache.get(key)
-        if (!picked) { picked = new Map(await getPickedBySku(l.sku)); pickedCache.set(key, picked) }
-        const res = suggestPick(await getRowsBySku(l.sku), need, picked)
-        // Dòng PK trùng SKU: trừ phần đã gợi ý để không lấy trùng cùng một vị trí.
+        if (!picked) { picked = new Map(await getPickedByLot(l.sku)); pickedCache.set(key, picked) }
+        let rows = rowsCache.get(key)
+        if (!rows) { rows = await getRowsBySku(l.sku); rowsCache.set(key, rows) }
+        const res = suggestPick(rows, need, picked, l)
+        // Dòng PK trùng SKU: trừ phần đã gợi ý để không lấy trùng cùng một lô.
         for (const it of res.items) {
-          const k = locKey(it.row.source, it.row.location, it.row.batch_no)
-          picked.set(k, (picked.get(k) ?? 0) + it.qty)
+          if (it.row.lot_id != null) picked.set(it.row.lot_id, (picked.get(it.row.lot_id) ?? 0) + it.qty)
         }
-        out.push({ line: l, items: res.items, missing: res.missing })
+        results[i] = { line: l, items: res.items, missing: res.missing }
       }
+      const out = results.filter((x): x is AutoLine => x !== null)
       if (out.length === 0) return setMsg('Mọi dòng đã đủ, không còn gì để tự chọn.')
       setAuto(out)
     } catch (e) { fail(e) }
@@ -275,11 +284,12 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(lines.data ?? []).map((l, idx) => {
           const w = weighed.rows[idx]
-          const pr = lineProgress(l.qty_need, done.get(l.sku.toUpperCase()) ?? 0)
+          const pr = lineProgress(l.qty_need, alloc[idx])
           const i = info.data?.get(skuKey(l.sku))
           return (
             <Card key={l.id} className="space-y-2">
               <p className="text-lg font-bold">{l.sku}</p>
+              {(l.batch_no || l.manuf_date) && <p className="text-sm text-slate-600">{l.batch_no ? `Batch ${l.batch_no}` : ''}{l.batch_no && l.manuf_date ? ' · ' : ''}{l.manuf_date ? `Ngày SX ${l.manuf_date}` : ''}</p>}
               {l.description && <p className="text-sm text-slate-600">{l.description}</p>}
               <p>Cần <b>{fmtQty(pr.need)}</b> · Đã lấy <b>{fmtQty(pr.picked)}</b> · Còn thiếu{' '}
                 <b className={pr.missing > 0 ? 'text-red-700' : 'text-green-700'}>{fmtQty(pr.missing)}</b> {l.uom}</p>
@@ -332,7 +342,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
       {form && o && (
         <PickForm
           target={form.target}
-          pickOrder={{ id, code: o.code, need: form.line.qty_need, picked: done.get(form.line.sku.toUpperCase()) ?? 0, choices: form.choices }}
+          pickOrder={{ id, code: o.code, need: form.line.qty_need, picked: alloc[(lines.data ?? []).findIndex((x) => x.id === form.line.id)] ?? 0, choices: form.choices }}
           onClose={() => setForm(null)}
           onSaved={reloadAll}
         />
@@ -346,7 +356,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
               <div key={a.line.id} className="space-y-1 border-b border-slate-200 pb-2">
                 <p className="font-bold">{a.line.sku} <span className="font-normal text-slate-600">{a.line.description}</span></p>
                 {a.items.map((it, k) => (
-                  <p key={k} className="text-sm">{it.row.location || '—'}{it.row.batch_no ? ` · ${it.row.batch_no}` : ''} · lấy <b>{fmtQty(it.qty)}</b> {a.line.uom}</p>
+                  <p key={k} className="text-sm">{it.row.location || '—'}{it.row.batch_no ? ` · ${it.row.batch_no}` : ''}{it.row.manuf_date ? ` · NSX ${it.row.manuf_date}` : ''} · lấy <b>{fmtQty(it.qty)}</b> {a.line.uom}</p>
                 ))}
                 {a.missing > 0 && <p className="text-sm font-semibold text-red-700">Thiếu {fmtQty(a.missing)} {a.line.uom}</p>}
               </div>
@@ -363,8 +373,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
           <div className="max-h-dvh w-full max-w-md space-y-3 overflow-y-auto rounded-b-2xl bg-white p-4 md:rounded-2xl">
             <h2 className="text-xl font-bold">Sửa lần lấy · {edit.pick.sku}</h2>
             <Field label="Số lượng"><input className={inputClass} inputMode="decimal" value={edit.qty} onChange={(e) => upd({ qty: e.target.value })} /></Field>
-            <Field label="Vị trí"><input className={inputClass} value={edit.location} onChange={(e) => upd({ location: e.target.value })} /></Field>
-            <Field label="Lô / Batch"><input className={inputClass} value={edit.batch} onChange={(e) => upd({ batch: e.target.value })} /></Field>
+            <p className="text-sm text-slate-600">Lô: {edit.location || '—'}{edit.batch ? ` · ${edit.batch}` : ''}{edit.pick.lot_id != null ? ` · Lô #${edit.pick.lot_id}` : ''}</p>
             <Field label="Ngày giờ"><input className={inputClass} type="datetime-local" value={edit.at} onChange={(e) => upd({ at: e.target.value })} /></Field>
             <Field label="Ghi chú"><input className={inputClass} value={edit.note} onChange={(e) => upd({ note: e.target.value })} /></Field>
             <div className="flex gap-2">

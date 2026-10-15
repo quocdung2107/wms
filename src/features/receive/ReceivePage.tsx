@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PickedMap } from '../../shared/inventory/edit.ts'
-import { getPickedBySku, nowLocal, skuKey } from '../../shared/inventory/history.ts'
+import { getPickedByLot, nowLocal, skuKey } from '../../shared/inventory/history.ts'
 import { planReceive, type ReceiveLine, type ReceivePlan } from '../../shared/inventory/receive.ts'
 import { applyReceivePlan, getRows, listSources, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
@@ -62,7 +62,7 @@ export default function ReceivePage() {
     const skus = new Set([...rows.map((r) => r.sku), ...lines.map((l) => l.sku.trim())].filter(Boolean))
     for (const s of skus) {
       const k = skuKey(s)
-      const m = await getPickedBySku(s)
+      const m = await getPickedByLot(s)
       const cur = picked.get(k)
       if (cur) for (const [a, b] of m) cur.set(a, (cur.get(a) ?? 0) + b)
       else picked.set(k, new Map(m))

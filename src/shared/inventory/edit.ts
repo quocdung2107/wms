@@ -1,17 +1,17 @@
-// Sửa / di chuyển / tách / gộp dòng tồn. Hàm thuần: nhận dòng + "đã lấy" (theo locKey, của đúng SKU),
+// Sửa / di chuyển / tách / gộp dòng tồn. Hàm thuần: nhận dòng + "đã lấy" (theo lot_id, của đúng SKU),
 // trả danh sách thao tác SQL (EditOp) + bản ghi nhật ký, hoặc lỗi. repo.ts mới ghi vào DB.
 //
 // Lô (lot_id): sửa/di chuyển một phần/tách phần 1 giữ lot_id; dòng insert được repo cấp lot_id mới từ lot_counter;
 // gộp chuyển picks.lot_id của dòng bị xoá sang dòng đầu.
 //
-// Giữ tồn ước tính: ước tính = qty_system - picked(locKey). Picks cũ giữ nguyên khoá cũ, nên khi dòng
-// sang khoá mới ta đặt qty_system mới = ước tính cần giữ + picked(khoá mới) -> ước tính không đổi.
+// Tồn ước tính = qty_system - picked(lot_id). Picks đi theo lot_id nên sửa Location/Batch/Ngày SX không
+// cần bù qty_system; dòng insert (lot mới) có picked = 0 nên qty_system = đúng số lượng.
 import type { StdRow } from '../excel/reader.ts'
-import { locKey, skuKey } from './history.ts'
+import { skuKey } from './history.ts'
 import type { InvRow } from './sheet.ts'
 
 export type EditRow = InvRow & { source: string; lot_id?: number | null } // source = tên nguồn (khớp picks.source)
-export type PickedMap = Map<string, number> // locKey -> đã lấy (của một SKU)
+export type PickedMap = Map<number, number> // lot_id -> đã lấy (của một SKU)
 
 export type EditOp =
   | { op: 'update'; id: number; set: Partial<StdRow> }
@@ -33,14 +33,13 @@ const fail = (error: string): EditPlan => ({ ok: false, error })
 export const r6 = (n: number) => Math.round(n * 1e6) / 1e6
 export const t = (s: string | null | undefined) => (s ?? '').trim()
 
-const pickedOf = (picked: PickedMap, r: { source: string }, location: string, batch: string) =>
-  picked.get(locKey(r.source, location, batch)) ?? 0
+export const pickedOf = (picked: PickedMap, r: { lot_id?: number | null }) => (r.lot_id != null ? picked.get(r.lot_id) ?? 0 : 0)
 
-/** Tồn ước tính của dòng = qty_system - đã lấy theo khoá hiện tại. */
+/** Tồn ước tính của dòng = qty_system - đã lấy theo lot_id của dòng. */
 export function rowEstimate(r: EditRow, picked: PickedMap): number {
   return r.qty_system === null || r.qty_system === undefined
-    ? 0 - pickedOf(picked, r, r.location, r.batch_no)
-    : r6(r.qty_system - pickedOf(picked, r, r.location, r.batch_no))
+    ? 0 - pickedOf(picked, r)
+    : r6(r.qty_system - pickedOf(picked, r))
 }
 
 /** Chuẩn hoá ngày về YYYY-MM-DD (nhận YYYY-MM-DD hoặc DD/MM/YYYY); rỗng -> ''; sai -> null. */
@@ -87,7 +86,6 @@ export function planEdit(
   if (manuf === null) return fail('Ngày SX không hợp lệ (dùng YYYY-MM-DD hoặc DD/MM/YYYY)')
   const est = rowEstimate(row, picked)
   const set: Partial<StdRow> = { location, batch_no: batch, manuf_date: manuf }
-  if (row.qty_system !== null && row.qty_system !== undefined) set.qty_system = r6(est + pickedOf(picked, row, location, batch))
   const after: RowSnap = { id: row.id, lot_id: row.lot_id ?? null, location, batch_no: batch, manuf_date: manuf, qty: est }
   return { ok: true, ops: [{ op: 'update', id: row.id, set }], log: { kind: 'edit', sku: row.sku, source: row.source, before: [snap(row, picked)], after: [after] } }
 }
@@ -112,16 +110,16 @@ export function planMove(row: EditRow, qty: number, toLocation: string, all: Edi
   const after: RowSnap[] = []
   if (left === 0) ops.push({ op: 'delete', id: row.id })
   else {
-    ops.push({ op: 'update', id: row.id, set: { qty_system: r6(left + pickedOf(picked, row, row.location, row.batch_no)) } })
+    ops.push({ op: 'update', id: row.id, set: { qty_system: r6(left + pickedOf(picked, row)) } })
     after.push({ ...snap(row, picked), qty: left })
   }
   if (target) {
     before.push(snap(target, picked))
     const tq = r6(rowEstimate(target, picked) + qty)
-    ops.push({ op: 'update', id: target.id, set: { qty_system: r6(tq + pickedOf(picked, target, target.location, target.batch_no)) } })
+    ops.push({ op: 'update', id: target.id, set: { qty_system: r6(tq + pickedOf(picked, target)) } })
     after.push({ ...snap(target, picked), qty: tq })
   } else {
-    ops.push({ op: 'insert', source_id: row.source_id, row: cloneRow(row, { location: to, batch_no: batch, manuf_date: manuf, qty_system: r6(qty + pickedOf(picked, row, to, batch)) }) })
+    ops.push({ op: 'insert', source_id: row.source_id, row: cloneRow(row, { location: to, batch_no: batch, manuf_date: manuf, qty_system: qty }) })
     after.push({ location: to, batch_no: batch, manuf_date: manuf, qty })
   }
   return { ok: true, ops, log: { kind: 'move', sku: row.sku, source: row.source, before, after } }
@@ -147,7 +145,7 @@ export function planSplit(row: EditRow, parts: PartInput[], picked: PickedMap): 
   if (sum !== est) return fail(`Tổng các phần (${sum}) khác tồn ước tính (${est})`)
   const ops: EditOp[] = []
   norm.forEach((p, i) => {
-    const qs = r6(p.qty + pickedOf(picked, row, p.location, p.batch_no))
+    const qs = i === 0 ? r6(p.qty + pickedOf(picked, row)) : p.qty
     if (i === 0) ops.push({ op: 'update', id: row.id, set: { location: p.location, batch_no: p.batch_no, manuf_date: p.manuf_date, qty_system: qs } })
     else ops.push({ op: 'insert', source_id: row.source_id, row: cloneRow(row, { ...p, qty_system: qs }) })
   })
@@ -176,7 +174,7 @@ export function planMerge(rows: EditRow[], location: string, picked: PickedMap):
     {
       op: 'update', id: first.id,
       set: {
-        location: loc, qty_system: r6(total + pickedOf(picked, first, loc, batch)),
+        location: loc, qty_system: r6(total + rows.reduce((s, r) => s + pickedOf(picked, r), 0)),
         qty_available: sumOf('qty_available'), qty_damaged: sumOf('qty_damaged'), qty_hold: sumOf('qty_hold'),
       },
     },

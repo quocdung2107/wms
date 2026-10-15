@@ -347,15 +347,6 @@ export async function deletePick(id: number) {
   await query('DELETE FROM picks WHERE id = ?', [id])
 }
 
-/** "Đã lấy" của một SKU theo vị trí (key = locKey), chỉ tính picks sau lần nạp file hiện tại. */
-export async function getPickedBySku(sku: string): Promise<Map<string, number>> {
-  const { query } = await db()
-  const picks = (await query('SELECT source, location, batch_no, qty, picked_at FROM picks WHERE sku = ?', [sku])) as unknown as PickLike[]
-  const srcs = await query('SELECT name, loaded_at FROM sources')
-  const loadedAt = Object.fromEntries(srcs.map((s) => [s.name as string, (s.loaded_at as string) ?? '']))
-  return sumPicked(picks, loadedAt)
-}
-
 /** "Đã lấy" của một SKU theo lô (key = lot_id), chỉ tính picks sau lần nạp file hiện tại. */
 export async function getPickedByLot(sku: string): Promise<Map<number, number>> {
   const { query } = await db()

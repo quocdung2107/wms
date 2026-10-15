@@ -3,7 +3,7 @@ import {
   planEdit, planMerge, planMove, planSplit, rowEstimate,
   type EditPlan, type EditRow, type PartInput, type PickedMap, type RowSnap,
 } from '../../shared/inventory/edit.ts'
-import { getPickedBySku } from '../../shared/inventory/history.ts'
+import { getPickedByLot } from '../../shared/inventory/history.ts'
 import { applyEditPlan, getRows, listInventoryEdits, type Source } from '../../shared/inventory/repo.ts'
 import { Button, Field, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 
@@ -149,7 +149,7 @@ export function RowsPanel({ source, onChanged }: { source: Source; onChanged: ()
       .slice(0, 100)
       .map((r): EditRow => ({ ...r, source: source.name }))
     const picked = new Map<string, PickedMap>()
-    for (const sku of new Set(all.map((r) => r.sku))) picked.set(sku, await getPickedBySku(sku))
+    for (const sku of new Set(all.map((r) => r.sku))) picked.set(sku, await getPickedByLot(sku))
     return { rows: all, picked }
   }, [source.id, t])
 

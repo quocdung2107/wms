@@ -3,6 +3,7 @@ import { normDate, rowEstimate } from '../../shared/inventory/edit.ts'
 import type { EditRow, PickedMap } from '../../shared/inventory/edit.ts'
 
 export interface SuggestItem { row: EditRow; qty: number }
+export interface LotWant { batch_no?: string | null; manuf_date?: string | null }
 export interface SuggestResult { items: SuggestItem[]; missing: number }
 
 const t = (s: string | null | undefined) => (s ?? '').trim()
@@ -17,8 +18,23 @@ export function availableQty(r: EditRow, picked: PickedMap): number {
   return est
 }
 
-export function suggestPick(rows: EditRow[], need: number, picked: PickedMap = new Map()): SuggestResult {
+/** Lô tồn khớp yêu cầu Batch/Ngày SX của dòng PK (trường trống = không ràng buộc). */
+export function matchesWant(r: EditRow, want?: LotWant): boolean {
+  if (!want) return true
+  const b = t(want.batch_no)
+  if (b && t(r.batch_no).toLowerCase() !== b.toLowerCase()) return false
+  const m = normDate(want.manuf_date)
+  if (m && (normDate(r.manuf_date) || '') !== m) return false
+  return true
+}
+
+/**
+ * `picked`: đã lấy theo lot_id. `want`: Batch/Ngày SX của dòng PK; có thì chỉ xét lô khớp
+ * (hết lô khớp thì báo thiếu, không lấy lô khác).
+ */
+export function suggestPick(rows: EditRow[], need: number, picked: PickedMap = new Map(), want?: LotWant): SuggestResult {
   const cands = rows
+    .filter((row) => matchesWant(row, want))
     .map((row) => {
       const avail = availableQty(row, picked)
       const manuf = normDate(row.manuf_date) || ''

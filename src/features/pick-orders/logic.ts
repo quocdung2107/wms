@@ -1,8 +1,9 @@
 // Logic thuần của đơn picking (không import client/worker để test được dưới node).
 import { weightKey } from '../../shared/inventory/weight.ts'
-import { asNumber, asText, buildColumns, detectHeader, normKey, type Cell, type SheetData } from '../../shared/excel/reader.ts'
+import { normDate } from '../../shared/inventory/edit.ts'
+import { asDate, asNumber, asText, buildColumns, detectHeader, normKey, type Cell, type SheetData } from '../../shared/excel/reader.ts'
 
-export interface PickLine { sku: string; description: string; uom: string; qty_need: number }
+export interface PickLine { sku: string; description: string; uom: string; qty_need: number; batch_no?: string; manuf_date?: string }
 export interface LineError { row: number; message: string }
 
 /** PK-0001: số thứ tự từ bộ đếm tăng dần (không dùng max+1 nên không tái dùng mã đã xoá). */
@@ -14,11 +15,15 @@ export const normOrderRef = (s: string | null | undefined) => {
   return t === '' ? null : t
 }
 
-/** Gộp dòng trùng SKU (không phân biệt hoa thường), cộng dồn số cần; giữ thứ tự xuất hiện đầu tiên. */
+/** Khoá dòng PK: (SKU, Batch, Ngày SX); SKU/Batch không phân biệt hoa thường. */
+export const lineKey = (l: { sku: string; batch_no?: string | null; manuf_date?: string | null }) =>
+  [l.sku.trim().toUpperCase(), (l.batch_no ?? '').trim().toUpperCase(), (l.manuf_date ?? '').trim()].join('')
+
+/** Gộp dòng trùng (SKU, Batch, Ngày SX), cộng dồn số cần; giữ thứ tự xuất hiện đầu tiên. */
 export function mergeLines(lines: PickLine[]): PickLine[] {
   const out = new Map<string, PickLine>()
   for (const l of lines) {
-    const k = l.sku.trim().toUpperCase()
+    const k = lineKey(l)
     const cur = out.get(k)
     if (cur) {
       cur.qty_need += l.qty_need
@@ -33,6 +38,8 @@ const SKU_ALIASES = ['sku', 'ma hang', 'ma hang hoa', 'item code', 'item', 'ma v
 const QTY_ALIASES = ['so luong', 'sl', 'qty', 'quantity', 'so luong can', 'sl can', 'can lay']
 const DESC_ALIASES = ['ten hang', 'ten hang hoa', 'mo ta', 'description', 'item description']
 const UOM_ALIASES = ['dvt', 'don vi tinh', 'uom', 'pack code']
+const BATCH_ALIASES = ['batch', 'batch no', 'batchno', 'so lo', 'lo', 'lot', 'lot no']
+const MANUF_ALIASES = ['ngay sx', 'ngay san xuat', 'nsx', 'manuf date', 'manufacture date', 'mfg date', 'production date']
 
 export interface ParsedPickSheet { lines: PickLine[]; errors: LineError[]; missing: string[] }
 
@@ -53,6 +60,8 @@ export function parsePickSheet(sheet: SheetData): ParsedPickSheet {
   if (iSku === undefined || iQty === undefined) return { lines: [], errors: [], missing }
   const iDesc = find(DESC_ALIASES)
   const iUom = find(UOM_ALIASES)
+  const iBatch = find(BATCH_ALIASES)
+  const iManuf = find(MANUF_ALIASES)
 
   const lines: PickLine[] = []
   const errors: LineError[] = []
@@ -66,8 +75,17 @@ export function parsePickSheet(sheet: SheetData): ParsedPickSheet {
     const qty = asNumber(rawQty)
     if (qty === null) return void errors.push({ row, message: `Số lượng "${asText(rawQty)}" không phải số (SKU ${sku})` })
     if (qty <= 0) return void errors.push({ row, message: `Số lượng phải lớn hơn 0 (SKU ${sku})` })
+    let manuf = ''
+    if (iManuf !== undefined) {
+      const txt = asDate(r[iManuf])
+      const n = normDate(txt)
+      if (n === null) return void errors.push({ row, message: `Ngày SX "${txt}" không hợp lệ (SKU ${sku})` })
+      manuf = n
+    }
     lines.push({
       sku, qty_need: qty,
+      ...(iBatch === undefined ? {} : { batch_no: asText(r[iBatch]) }),
+      ...(iManuf === undefined ? {} : { manuf_date: manuf }),
       description: iDesc === undefined ? '' : asText(r[iDesc]),
       uom: iUom === undefined ? '' : asText(r[iUom]),
     })
@@ -91,6 +109,37 @@ export function pickedBySku(picks: { sku: string; qty: number }[]): Map<string, 
     m.set(k, (m.get(k) ?? 0) + (p.qty ?? 0))
   }
   return m
+}
+
+/**
+ * Chia số đã lấy (theo SKU, Q6) về từng dòng PK: dòng có Batch/Ngày SX nhận trước, mỗi dòng tối đa số cần;
+ * phần dư (lấy quá) dồn vào dòng đầu của SKU. Tổng theo SKU luôn bằng `done`. Kết quả cùng thứ tự `lines`.
+ */
+export function allocPicked(
+  lines: { sku: string; qty_need: number; batch_no?: string | null; manuf_date?: string | null }[],
+  done: Map<string, number>,
+): number[] {
+  const r6 = (n: number) => Math.round(n * 1e6) / 1e6
+  const key = (i: number) => lines[i].sku.trim().toUpperCase()
+  const spec = (i: number) => ((lines[i].batch_no ?? '').trim() || (lines[i].manuf_date ?? '').trim() ? 1 : 0)
+  const rem = new Map(done)
+  const out = lines.map(() => 0)
+  const order = lines.map((_, i) => i).sort((a, b) => spec(b) - spec(a) || a - b)
+  for (const i of order) {
+    const r = rem.get(key(i)) ?? 0
+    const take = Math.max(0, Math.min(r, lines[i].qty_need))
+    out[i] = take
+    rem.set(key(i), r6(r - take))
+  }
+  const seen = new Set<string>()
+  lines.forEach((_, j) => {
+    const k = key(j)
+    if (seen.has(k)) return
+    seen.add(k)
+    const left = rem.get(k) ?? 0
+    if (left > 0) out[j] = r6(out[j] + left)
+  })
+  return out.map(r6)
 }
 
 // ---------- nâng schema ----------

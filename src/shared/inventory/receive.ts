@@ -1,9 +1,9 @@
 // Nhập hàng tay: hàm thuần planReceive. Dòng trùng (nguồn+SKU+Location+BatchNo+Ngày SX) -> cộng qty_system;
 // không trùng -> insert. Các dòng trùng nhau trong phiếu được cộng gộp trước. Tồn ước tính tăng đúng bằng SL nhập.
 import type { StdRow } from '../excel/reader.ts'
-import { normDate, r6, t, rowEstimate } from './edit.ts'
+import { normDate, pickedOf, r6, t, rowEstimate } from './edit.ts'
 import type { EditLog, EditOp, EditRow, PickedMap, RowSnap } from './edit.ts'
-import { locKey, skuKey } from './history.ts'
+import { skuKey } from './history.ts'
 
 export interface ReceiveLine {
   sku: string
@@ -35,7 +35,7 @@ interface Group {
  * @param source nguồn nhận hàng (id + tên khớp picks.source)
  * @param lines các dòng phiếu
  * @param existing tồn hiện có (lọc theo source.id)
- * @param picked đã lấy theo locKey, tách theo skuKey (chữ hoa)
+ * @param picked đã lấy theo lot_id, tách theo skuKey (chữ hoa)
  * @param today YYYY-MM-DD, mặc định Ngày nhập khi bỏ trống
  */
 export function planReceive(
@@ -101,7 +101,6 @@ export function planReceive(
 
   const ops: EditOp[] = []
   const logMap = new Map<string, EditLog>()
-  const pickedAt = (k: string, location: string, batch: string) => picked.get(k)?.get(locKey(source.name, location, batch)) ?? 0
   const snap = (r: EditRow, qty: number): RowSnap => ({ id: r.id, lot_id: r.lot_id ?? null, location: t(r.location), batch_no: t(r.batch_no), manuf_date: t(r.manuf_date), qty })
 
   for (const g of groups.values()) {
@@ -114,14 +113,14 @@ export function planReceive(
     if (hit) {
       const est = rowEstimate(hit, picked.get(k) ?? new Map())
       const newEst = r6(est + g.qty)
-      ops.push({ op: 'update', id: hit.id, set: { qty_system: r6(newEst + pickedAt(k, hit.location, hit.batch_no)) } })
+      ops.push({ op: 'update', id: hit.id, set: { qty_system: r6(newEst + pickedOf(picked.get(k) ?? new Map(), hit)) } })
       log.before.push(snap(hit, est))
       log.after.push(snap(hit, newEst))
     } else {
       const info = base ? { description: base.description, uom: base.uom_raw } : newInfo.get(k)!
       const row: StdRow = {
         warehouse: base?.warehouse ?? '', location: g.location, sku: base?.sku ?? g.sku, description: info.description,
-        category: base?.category ?? '', uom_raw: info.uom, qty_system: r6(g.qty + pickedAt(k, g.location, g.batch)),
+        category: base?.category ?? '', uom_raw: info.uom, qty_system: g.qty,
         qty_available: null, qty_damaged: null, qty_hold: null, condition: '', batch_no: g.batch, lot_no: '',
         manuf_date: g.manuf, receive_date: g.recv, expiry_date: g.exp,
       }
