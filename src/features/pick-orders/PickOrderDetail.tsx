@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import PickForm, { fromInputDt, toInputDt, type LocTarget } from '../sku-lookup/PickForm.tsx'
-import { buildPickExport, deletePick, getPickedBySku, getSkuStockInfo, locKey, nowLocal, savePick, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
+import { buildPickExport, deletePick, getPickedByLot, getPickedBySku, getSkuStockInfo, locKey, nowLocal, savePick, skuKey, updatePick, type Pick } from '../../shared/inventory/history.ts'
 import { getRowsBySku, getSkuWeights, getUomMap, listCustomers, searchSkus, type SkuHit } from '../../shared/inventory/repo.ts'
 import { fmtQty } from '../../shared/inventory/sheet.ts'
 import { exportRows } from '../../shared/inventory/exportFile.ts'
@@ -98,14 +98,15 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
 
   async function openPick(line: PickOrderLine) {
     try {
-      const [rows, map, picked] = await Promise.all([getRowsBySku(line.sku), getUomMap(), getPickedBySku(line.sku)])
+      const [rows, map, picked] = await Promise.all([getRowsBySku(line.sku), getUomMap(), getPickedByLot(line.sku)])
       const uomOf = makeUomLabeler(map)
       const choices: LocTarget[] = rows.map((r) => ({
         sku: line.sku, description: line.description || r.description || '', source: r.source, location: r.location ?? '',
         batch_no: r.batch_no ?? '', uom: line.uom || uomOf(r.uom_raw), qtySystem: r.qty_system,
-        picked: picked.get(locKey(r.source, r.location, r.batch_no)) ?? 0,
+        picked: (r.lot_id != null ? picked.get(r.lot_id) : undefined) ?? 0,
+        lot_id: r.lot_id ?? null, manuf_date: r.manuf_date ?? '',
       }))
-      const target: LocTarget = { sku: line.sku, description: line.description, source: '', location: '', batch_no: '', uom: line.uom, qtySystem: null, picked: 0 }
+      const target: LocTarget = { sku: line.sku, description: line.description, source: '', location: '', batch_no: '', uom: line.uom, qtySystem: null, picked: 0, lot_id: null, manuf_date: '' }
       setForm({ line, target, choices })
     } catch (e) { fail(e) }
   }
@@ -145,7 +146,7 @@ export default function PickOrderDetail({ id, onBack }: { id: number; onBack: ()
         for (const it of a.items) {
           await savePick({
             sku: a.line.sku, description: a.line.description || it.row.description || '', source: it.row.source,
-            location: (it.row.location ?? '').trim(), batch_no: (it.row.batch_no ?? '').trim(),
+            location: (it.row.location ?? '').trim(), batch_no: (it.row.batch_no ?? '').trim(), lot_id: it.row.lot_id ?? null,
             uom: a.line.uom || uomOf(it.row.uom_raw), qty: it.qty, order_no: o.code, picked_at: at, note: '', pick_order_id: id,
           })
           n++

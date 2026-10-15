@@ -66,3 +66,14 @@ export function calcDiff(qtySystem: number | null | undefined, total: number): n
   const d = (qtySystem ?? 0) - total
   return Math.abs(d) < 1e-9 ? 0 : d
 }
+
+/** Còn lấy được của một lô = SL hệ thống - đã lấy theo lot_id (SL rỗng coi là 0). */
+export const lotRemaining = (qtySystem: number | null | undefined, picked: number) =>
+  Math.round(((qtySystem ?? 0) - picked) * 1e6) / 1e6
+
+/** Kiểm số lấy theo lô: lấy quá số còn của lô thì chặn. SL hệ thống rỗng (không rõ) thì không chặn. */
+export function checkLotPick(qtySystem: number | null | undefined, picked: number, qty: number): { ok: true } | { ok: false; left: number } {
+  if (qtySystem === null || qtySystem === undefined) return { ok: true }
+  const left = lotRemaining(qtySystem, picked)
+  return qty > left ? { ok: false, left } : { ok: true }
+}

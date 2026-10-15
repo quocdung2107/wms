@@ -3,11 +3,12 @@ import { NoDataNotice } from '../../shared/inventory/hooks.tsx'
 import { getRowsBySku, getUomMap, listSources, searchSkus, type SkuHit, type SkuRow } from '../../shared/inventory/repo.ts'
 import { flagOf, FLAG_TEXT, fmtDate, fmtQty } from '../../shared/inventory/sheet.ts'
 import { makeUomLabeler } from '../../shared/inventory/uom.ts'
-import { estimateStock, getPickedBySku, locKey } from '../../shared/inventory/history.ts'
+import { getPickedByLot } from '../../shared/inventory/history.ts'
 import { Button, Card, inputClass, Notice, useLoad } from '../../shared/ui/ui.tsx'
 
 import CountDrawer from './CountDrawer.tsx'
 import HistoryPage from './HistoryPage.tsx'
+import { lotRemaining } from './calc.ts'
 import PickForm, { type LocTarget } from './PickForm.tsx'
 
 export default function SkuLookupPage() {
@@ -18,7 +19,7 @@ export default function SkuLookupPage() {
   const [hits, setHits] = useState<SkuHit[]>([])
   const [sku, setSku] = useState('')
   const [rows, setRows] = useState<SkuRow[] | null>(null)
-  const [picked, setPicked] = useState<Map<string, number>>(new Map())
+  const [picked, setPicked] = useState<Map<number, number>>(new Map())
   const [showHistory, setShowHistory] = useState(false)
   const [panel, setPanel] = useState<{ kind: 'count' | 'pick'; target: LocTarget } | null>(null)
 
@@ -35,7 +36,7 @@ export default function SkuLookupPage() {
     setSku(code)
     setTerm(code)
     setHits([])
-    setPicked(await getPickedBySku(code).catch(() => new Map()))
+    setPicked(await getPickedByLot(code).catch(() => new Map()))
     setRows(await getRowsBySku(code))
   }
 
@@ -96,10 +97,11 @@ export default function SkuLookupPage() {
                 {rows.map((r) => {
                   const f = flagOf(r.qty_system)
                   const bad = r.condition && r.condition.toUpperCase() !== 'GOOD'
-                  const pk = picked.get(locKey(r.source, r.location, r.batch_no)) ?? 0
+                  const pk = (r.lot_id != null ? picked.get(r.lot_id) : undefined) ?? 0
                   const target: LocTarget = {
                     sku, description: rows[0].description ?? '', source: r.source ?? '', location: r.location ?? '',
                     batch_no: r.batch_no ?? '', uom: uomOf(r.uom_raw), qtySystem: r.qty_system, picked: pk,
+                    lot_id: r.lot_id ?? null, manuf_date: r.manuf_date ?? '',
                   }
                   return (
                     <Card key={r.id} className="space-y-1">
@@ -118,6 +120,7 @@ export default function SkuLookupPage() {
                           ['Hạn dùng', fmtDate(r.expiry_date)],
                           ['Tình trạng', r.condition],
                           ['Lot', r.lot_no],
+                          ['Lô #', r.lot_id != null ? String(r.lot_id) : ''],
                           ['Kho', r.warehouse],
                           ['Nguồn', r.source],
                         ] as const).map(([k, v]) =>
@@ -130,7 +133,7 @@ export default function SkuLookupPage() {
                         )}
                       </dl>
                       <p className="text-base">
-                        Đã lấy: <b>{fmtQty(pk)}</b> · Tồn ước tính: <b>{fmtQty(estimateStock(r.qty_system, pk))}</b>
+                        Đã lấy: <b>{fmtQty(pk)}</b> · Tồn ước tính: <b>{fmtQty(lotRemaining(r.qty_system, pk))}</b>
                       </p>
                       <div className="flex gap-2 pt-1">
                         <Button className="flex-1" onClick={() => setPanel({ kind: 'count', target })}>Kiểm</Button>
@@ -146,7 +149,7 @@ export default function SkuLookupPage() {
       )}
       {panel?.kind === 'count' && <CountDrawer target={panel.target} onClose={() => setPanel(null)} onSaved={() => {}} />}
       {panel?.kind === 'pick' && (
-        <PickForm target={panel.target} onClose={() => setPanel(null)} onSaved={() => getPickedBySku(sku).then(setPicked, () => {})} />
+        <PickForm target={panel.target} onClose={() => setPanel(null)} onSaved={() => getPickedByLot(sku).then(setPicked, () => {})} />
       )}
     </div>
   )

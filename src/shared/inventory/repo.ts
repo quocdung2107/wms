@@ -204,7 +204,7 @@ export async function searchSkus(term: string, limit = 8): Promise<SkuHit[]> {
   )) as SkuHit[]
 }
 
-export type SkuRow = InvRow & { source: string }
+export type SkuRow = InvRow & { source: string; lot_id: number | null }
 
 export async function getRowsBySku(sku: string): Promise<SkuRow[]> {
   await initSchema()

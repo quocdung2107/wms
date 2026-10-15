@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  sumPicked, estimateStock, skuStockInfo, locKey, nowLocal, dateBounds,
+  sumPicked, sumPickedByLot, estimateStock, skuStockInfo, locKey, nowLocal, dateBounds,
   buildCountExport, buildPickExport, countKey, latestCounts, assignCounts, type CountSession, type Pick, type PickLike,
 } from '../src/shared/inventory/history.ts'
 
@@ -149,4 +149,14 @@ test('assignCounts: chỉ dòng đầu của khoá nhận số; chưa đếm th�
   }
   assert.equal(assignCounts(lines, counted, { source: 'Z' }).size, 0)
   assert.deepEqual([...assignCounts([{ ...lines[0], source: 'A' }], counted)], [['a', 9]])
+})
+
+test('sumPickedByLot: ca DXS26, 2 lô cùng vị trí+batch tách riêng, bỏ pick chưa rõ lô', () => {
+  const m = sumPickedByLot(
+    [p({ lot_id: 1, qty: 150 } as never), p({ lot_id: 1, qty: 0 } as never), p({ lot_id: null, qty: 7 } as never), p({ lot_id: 2, qty: 5, picked_at: '2026-10-05 08:00:00' } as never)],
+    { A: '2026-10-05 09:00:00' },
+  )
+  assert.equal(m.get(1), 150)
+  assert.equal(m.get(2), undefined)
+  assert.equal(m.size, 1)
 })

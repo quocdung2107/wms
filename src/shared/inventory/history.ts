@@ -36,6 +36,8 @@ export interface Pick {
   note: string
   /** Đơn picking (PK-xxxx) mà lần lấy này thuộc về; null/thiếu = lần lấy lẻ từ Tra SKU. */
   pick_order_id?: number | null
+  /** Lô tồn (inventory_rows.lot_id) mà lần lấy trừ vào; null/thiếu = chưa rõ lô. */
+  lot_id?: number | null
 }
 
 export type PickInput = Omit<Pick, 'id'>
@@ -70,6 +72,21 @@ export function sumPicked(picks: PickLike[], loadedAt: Record<string, string>): 
     if (la === undefined || !p.picked_at || p.picked_at < la) continue
     const k = locKey(p.source, p.location, p.batch_no)
     out.set(k, (out.get(k) ?? 0) + (p.qty ?? 0))
+  }
+  return out
+}
+
+/**
+ * Tổng "đã lấy" theo lô (lot_id): chỉ picks có lot_id, picked_at >= loaded_at của nguồn.
+ * Pick chưa rõ lô (lot_id rỗng) không vào bản đồ này (vẫn tính ở tổng SKU).
+ */
+export function sumPickedByLot(picks: (PickLike & { lot_id?: number | null })[], loadedAt: Record<string, string>): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const p of picks) {
+    if (p.lot_id == null) continue
+    const la = loadedAt[p.source ?? '']
+    if (la === undefined || !p.picked_at || p.picked_at < la) continue
+    out.set(p.lot_id, (out.get(p.lot_id) ?? 0) + (p.qty ?? 0))
   }
   return out
 }
@@ -255,9 +272,9 @@ export async function savePick(p: PickInput): Promise<number> {
   if (!(p.qty > 0)) throw new Error('Số lượng phải lớn hơn 0')
   const { query } = await db()
   await query(
-    `INSERT INTO picks (sku, description, source, location, batch_no, uom, qty, order_no, picked_at, note, pick_order_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no?.trim() || null, p.picked_at || nowLocal(), p.note, p.pick_order_id ?? null],
+    `INSERT INTO picks (sku, description, source, location, batch_no, uom, qty, order_no, picked_at, note, pick_order_id, lot_id, period)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?, (SELECT period FROM sources WHERE name = ?))`,
+    [p.sku, p.description, p.source, p.location, p.batch_no, p.uom, p.qty, p.order_no?.trim() || null, p.picked_at || nowLocal(), p.note, p.pick_order_id ?? null, p.lot_id ?? null, p.source],
   )
   const [{ id }] = await query('SELECT last_insert_rowid() AS id')
   return id as number
@@ -302,6 +319,7 @@ export async function listPicks(f: HistoryFilter = {}): Promise<Pick[]> {
     location: str(r.location), batch_no: str(r.batch_no), uom: str(r.uom), qty: (r.qty as number) ?? 0,
     order_no: r.order_no == null ? null : String(r.order_no), picked_at: str(r.picked_at), note: str(r.note),
     pick_order_id: r.pick_order_id == null ? null : (r.pick_order_id as number),
+    lot_id: r.lot_id == null ? null : (r.lot_id as number),
   }))
 }
 
@@ -336,6 +354,15 @@ export async function getPickedBySku(sku: string): Promise<Map<string, number>> 
   const srcs = await query('SELECT name, loaded_at FROM sources')
   const loadedAt = Object.fromEntries(srcs.map((s) => [s.name as string, (s.loaded_at as string) ?? '']))
   return sumPicked(picks, loadedAt)
+}
+
+/** "Đã lấy" của một SKU theo lô (key = lot_id), chỉ tính picks sau lần nạp file hiện tại. */
+export async function getPickedByLot(sku: string): Promise<Map<number, number>> {
+  const { query } = await db()
+  const picks = (await query('SELECT source, location, batch_no, qty, picked_at, lot_id FROM picks WHERE sku = ? AND lot_id IS NOT NULL', [sku])) as unknown as (PickLike & { lot_id: number })[]
+  const srcs = await query('SELECT name, loaded_at FROM sources')
+  const loadedAt = Object.fromEntries(srcs.map((s) => [s.name as string, (s.loaded_at as string) ?? '']))
+  return sumPickedByLot(picks, loadedAt)
 }
 
 /** Tồn/đã lấy/hold theo SKU (không phân biệt hoa thường), gom từ SQLite. */

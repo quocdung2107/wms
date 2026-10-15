@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { evalExpr, sumLines, calcDiff } from '../src/features/sku-lookup/calc.ts'
+import { evalExpr, sumLines, calcDiff, lotRemaining, checkLotPick } from '../src/features/sku-lookup/calc.ts'
 
 const val = (s: string) => { const r = evalExpr(s); return r.ok ? r.value : null }
 
@@ -27,4 +27,20 @@ test('sumLines, calcDiff', () => {
   assert.equal(calcDiff(100, 100), 0)
   assert.equal(calcDiff(null, 5), -5)
   assert.equal(calcDiff(0.3, 0.1 + 0.2), 0)
+})
+
+test('ca DXS26: lấy 150 từ lô 12/10 (SL 200) -> còn 50; lô 13/10 (SL 100) còn 100; tổng không đổi', () => {
+  const a = { qty: 200, picked: 150 }
+  const b = { qty: 100, picked: 0 }
+  assert.equal(lotRemaining(a.qty, a.picked), 50)
+  assert.equal(lotRemaining(b.qty, b.picked), 100)
+  assert.equal(lotRemaining(a.qty, a.picked) + lotRemaining(b.qty, b.picked), 300 - 150)
+  assert.deepEqual(checkLotPick(200, 0, 150), { ok: true })
+})
+
+test('lấy 150 từ lô 100 bị chặn', () => {
+  assert.deepEqual(checkLotPick(100, 0, 150), { ok: false, left: 100 })
+  assert.deepEqual(checkLotPick(200, 150, 51), { ok: false, left: 50 })
+  assert.deepEqual(checkLotPick(200, 150, 50), { ok: true })
+  assert.deepEqual(checkLotPick(null, 0, 5), { ok: true })
 })
