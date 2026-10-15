@@ -7,6 +7,7 @@ import { CUSTOMER_FIELDS, customerKey, normalizeCustomer, validateCustomer, type
 import type { EditLog, EditOp, EditPlan } from './edit.ts'
 import { pickOrdersUpgradeSql, picksUpgradeSql } from '../../features/pick-orders/logic.ts'
 import type { ReceivePlan } from './receive.ts'
+import { lotUpgradeSql, planLotMigration } from './lot-migrate.ts'
 
 export type SavedMapping = Partial<Record<StdField, string>> // trường chuẩn → nhãn cột
 
@@ -72,13 +73,46 @@ export function initSchema() {
     const poCols = (await query('PRAGMA table_info(pick_orders)')).map((c) => String(c.name))
     const poSql = pickOrdersUpgradeSql(poCols)
     if (poSql.length) await batch(poSql.map((sql) => ({ sql })))
+    await migrateLots()
     const [{ n }] = await query('SELECT COUNT(*) AS n FROM uom_map')
     if (n === 0) await batch(Object.entries(DEFAULT_UOM).map(([k, v]) => ({ sql: 'INSERT INTO uom_map VALUES (?, ?)', bind: [k, v] })))
   })()
   return schemaReady
 }
 
-const toSource = (r: Record<string, unknown>): Source => ({
+/** Thêm cột/bảng lô + kỳ, cấp lot_id và chuyển đổi pick cũ trong MỘT giao dịch. Chạy lại không đổi gì. */
+async function migrateLots() {
+  const colsOf = async (t: string) => (await query(`PRAGMA table_info(${t})`)).map((c) => String(c.name))
+  const upgrade = lotUpgradeSql({
+    inventory_rows: await colsOf('inventory_rows'),
+    picks: await colsOf('picks'),
+    sources: await colsOf('sources'),
+    pick_order_lines: await colsOf('pick_order_lines'),
+  })
+  const str = (v: unknown) => (v == null ? '' : String(v))
+  // ALTER phải chạy trước khi SELECT các cột mới.
+  await batch(upgrade.map((sql) => ({ sql })))
+  const rows = (await query('SELECT r.id, r.sku, s.name AS source, r.location, r.batch_no, r.manuf_date, r.qty_system, r.lot_id FROM inventory_rows r JOIN sources s ON s.id = r.source_id')).map((r) => ({
+    id: r.id as number, sku: str(r.sku), source: str(r.source), location: str(r.location), batch_no: str(r.batch_no),
+    manuf_date: str(r.manuf_date), qty_system: Number(r.qty_system) || 0, lot_id: (r.lot_id as number | null) ?? null,
+  }))
+  const picks = (await query('SELECT * FROM picks WHERE period IS NULL AND lot_id IS NULL')).map((r) => ({
+    id: r.id as number, sku: str(r.sku), description: str(r.description), source: str(r.source), location: str(r.location),
+    batch_no: str(r.batch_no), uom: str(r.uom), qty: Number(r.qty) || 0, order_no: r.order_no == null ? null : String(r.order_no),
+    picked_at: str(r.picked_at), note: str(r.note), pick_order_id: (r.pick_order_id as number | null) ?? null,
+    lot_id: null, period: null,
+  }))
+  const srcs = await query('SELECT name, loaded_at, period FROM sources')
+  const [{ n: counter }] = await query('SELECT n FROM lot_counter WHERE id = 1')
+  const plan = planLotMigration({
+    rows, picks, counter: Number(counter) || 0,
+    loadedAt: Object.fromEntries(srcs.map((s) => [str(s.name), str(s.loaded_at)])),
+    currentPeriod: Object.fromEntries(srcs.map((s) => [str(s.name), Number(s.period) || 1])),
+  })
+  if (plan.statements.length) await batch(plan.statements)
+}
+
+const toSource =(r: Record<string, unknown>): Source => ({
   id: r.id as number,
   name: r.name as string,
   sheet: (r.sheet as string) ?? '',
