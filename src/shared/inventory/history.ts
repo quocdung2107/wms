@@ -81,6 +81,45 @@ export interface SkuStockInfo { total: number; picked: number; estimate: number;
 
 export const skuKey = (sku: string) => sku.trim().toUpperCase()
 
+/** Khoá số đếm: (nguồn, vị trí, batch, SKU); null/rỗng như nhau, SKU không phân biệt hoa thường. Không gồm warehouse. */
+export const countKey = (source: string | null, location: string | null, batch: string | null, sku: string | null) =>
+  `${locKey(source, location, batch)}${skuKey(sku ?? '')}`
+
+/** Mỗi khoá giữ lần đếm có counted_at mới nhất; hoà giờ thì id lớn hơn. */
+export function latestCounts(sessions: CountSession[]): Map<string, CountSession> {
+  const out = new Map<string, CountSession>()
+  for (const s of sessions) {
+    const k = countKey(s.source, s.location, s.batch_no, s.sku)
+    const cur = out.get(k)
+    if (!cur || s.counted_at > cur.counted_at || (s.counted_at === cur.counted_at && s.id > cur.id)) out.set(k, s)
+  }
+  return out
+}
+
+export interface CountLineLike { key: string; source?: string | null; location: string | null; batch_no: string | null; sku: string | null }
+
+/**
+ * Gán số đếm cho dòng phiếu: chỉ dòng ĐẦU của mỗi khoá (Vị trí, SKU, Batch) nhận số, dòng sau để trống.
+ * Quy tắc này áp cho cả khi gộp (merge) vì dòng gộp theo condition vẫn cùng khoá.
+ * opts.source: nguồn mặc định khi dòng không có source.
+ */
+export function assignCounts(
+  lines: CountLineLike[],
+  counted: Map<string, CountSession>,
+  opts: { merge?: boolean; source?: string | null } = {},
+): Map<string, number> {
+  const out = new Map<string, number>()
+  const seen = new Set<string>()
+  for (const l of lines) {
+    const k = countKey(l.source ?? opts.source ?? '', l.location, l.batch_no, l.sku)
+    if (seen.has(k)) continue
+    seen.add(k)
+    const c = counted.get(k)
+    if (c) out.set(l.key, c.qty_counted)
+  }
+  return out
+}
+
 /**
  * Hold = mọi lần lấy (lẻ hoặc thuộc đơn picking). Hiện luôn true; hàm tách riêng
  * ("hold mở") để sau này lọc theo trạng thái đơn picking.
@@ -234,6 +273,11 @@ export async function listCounts(f: HistoryFilter = {}): Promise<CountSession[]>
     qty_system: (r.qty_system as number) ?? 0, qty_counted: (r.qty_counted as number) ?? 0, diff: (r.diff as number) ?? 0,
     counted_at: str(r.counted_at), note: str(r.note),
   }))
+}
+
+/** Lần đếm mới nhất của mọi khoá, không giới hạn ngày. */
+export async function listLatestCounts(): Promise<Map<string, CountSession>> {
+  return latestCounts(await listCounts())
 }
 
 export async function getCountLines(sessionId: number): Promise<CountLine[]> {

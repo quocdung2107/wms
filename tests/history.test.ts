@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   sumPicked, estimateStock, skuStockInfo, locKey, nowLocal, dateBounds,
-  buildCountExport, buildPickExport, type CountSession, type Pick, type PickLike,
+  buildCountExport, buildPickExport, countKey, latestCounts, assignCounts, type CountSession, type Pick, type PickLike,
 } from '../src/shared/inventory/history.ts'
 
 const p = (o: Partial<PickLike> = {}): PickLike =>
@@ -105,4 +105,48 @@ test('skuStockInfo: nhiều nguồn/vị trí, lẻ cũng hold, trước loaded_
   assert.deepEqual(m.get('X1'), { total: 15, picked: 7, estimate: 8, hold: 7 })
   assert.deepEqual(m.get('NOSTOCK'), { total: 0, picked: 6, estimate: -6, hold: 6 })
   assert.deepEqual(m.get('Y'), { total: 2, picked: 5, estimate: -3, hold: 5 })
+})
+
+const cs = (o: Partial<CountSession> = {}): CountSession => ({
+  id: 1, sku: 'X1', description: '', source: 'A', location: 'L1', batch_no: 'B1', uom: '', qty_system: 10,
+  qty_counted: 5, diff: -5, counted_at: '2026-10-05 10:00:00', note: '', ...o,
+})
+
+test('latestCounts: lấy bản mới nhất, hoà giờ -> id lớn, khoá khác tách riêng', () => {
+  const m = latestCounts([
+    cs({ id: 1, qty_counted: 1 }),
+    cs({ id: 2, qty_counted: 2, counted_at: '2026-10-06 10:00:00' }),
+    cs({ id: 3, qty_counted: 3, counted_at: '2026-10-04 10:00:00' }),
+    cs({ id: 5, qty_counted: 50, location: 'L2' }),
+    cs({ id: 7, qty_counted: 70, location: 'L2' }),
+    cs({ id: 6, qty_counted: 60, location: 'L2' }),
+  ])
+  assert.equal(m.size, 2)
+  assert.equal(m.get(countKey('A', 'L1', 'B1', 'X1'))?.qty_counted, 2)
+  assert.equal(m.get(countKey('A', 'L2', 'B1', 'X1'))?.qty_counted, 70)
+})
+
+test('latestCounts: null/rỗng và hoa thường SKU coi như nhau', () => {
+  const m = latestCounts([
+    cs({ id: 1, location: '', batch_no: '', sku: 'ab ', qty_counted: 1 }),
+    cs({ id: 2, location: '', batch_no: '', sku: 'AB', qty_counted: 2 }),
+  ])
+  assert.equal(m.size, 1)
+  assert.equal(m.get(countKey('A', null, null, 'Ab'))?.qty_counted, 2)
+  assert.equal(latestCounts([]).size, 0)
+})
+
+test('assignCounts: chỉ dòng đầu của khoá nhận số; chưa đếm thì trống', () => {
+  const counted = latestCounts([cs({ qty_counted: 9 })])
+  const lines = [
+    { key: 'a', location: 'L1', batch_no: 'B1', sku: 'x1' },
+    { key: 'b', location: 'L1', batch_no: 'B1', sku: 'X1' },
+    { key: 'c', location: 'L9', batch_no: 'B1', sku: 'X1' },
+  ]
+  for (const merge of [false, true]) {
+    const m = assignCounts(lines, counted, { merge, source: 'A' })
+    assert.deepEqual([...m], [['a', 9]])
+  }
+  assert.equal(assignCounts(lines, counted, { source: 'Z' }).size, 0)
+  assert.deepEqual([...assignCounts([{ ...lines[0], source: 'A' }], counted)], [['a', 9]])
 })
