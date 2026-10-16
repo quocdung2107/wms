@@ -4,6 +4,7 @@ import { errText } from './api'
 import { CustomerPicker } from './NewOrderForm'
 import { NoteAction } from './NoteAction'
 import { STATUSES } from './status'
+import { allowedTargets } from './statusFlow'
 import type { GroupCtx, Order } from './types'
 
 export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order; act: (name: string, args: Record<string, unknown>) => Promise<void> }) {
@@ -13,12 +14,13 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
   const [cust, setCust] = useState<{ name: string; addr: string; code: string } | null>(null)
   const [ship, setShip] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
-  const nextStatuses = STATUSES.filter((s) => s.code !== 'COMPLETED' && s.code !== order.status)
+  const targets = allowedTargets(ctx.roles, order.assignee_id === ctx.me)
+  const nextStatuses = STATUSES.filter((s) => targets.includes(s.code) && s.code !== order.status)
   const chosenStatus = status && nextStatuses.some((s) => s.code === status) ? status : (nextStatuses[0]?.code ?? '')
   const assigneeValue = assignee ?? order.assignee_id ?? ''
   return (
     <>
-      {!done && ctx.canWork && (
+      {!done && ctx.canNote && (
         <Card className="space-y-5">
           {ctx.canCoordinate && (
             <form
@@ -44,6 +46,7 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
               <Button type="submit">Lưu người đặt hàng</Button>
             </form>
           )}
+          {ctx.canWork && (
           <div className="space-y-3">
             <Field label="Mã vận chuyển (gõ đè mã thật của hãng)">
               <input className={inputClass} maxLength={40} value={ship ?? order.shipment_code ?? ''} onChange={(e) => setShip(e.target.value)} />
@@ -77,7 +80,9 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
               </Button>
             </div>
           </div>
+          )}
           {msg && <p className="text-sm text-slate-700">{msg}</p>}
+          {nextStatuses.length > 0 ? (
           <NoteAction label="Ghi chú (bắt buộc khi lùi trạng thái)" button="Cập nhật trạng thái" kind="primary" onSubmit={(note) => act('change_status', { p_status: chosenStatus, p_note: note || null })}>
             <Field label="Trạng thái mới">
               <select className={inputClass} value={chosenStatus} onChange={(e) => setStatus(e.target.value)}>
@@ -89,6 +94,9 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
               </select>
             </Field>
           </NoteAction>
+          ) : (
+            !ctx.canCoordinate && <p className="text-sm text-slate-600">{ctx.canWork ? 'Bạn chỉ đổi được trạng thái của đơn được giao cho mình, trong phạm vi vai trò.' : 'Người theo dõi: chỉ nhắn tin và ghi chú, không đổi trạng thái.'}</p>
+          )}
 
           {ctx.canCoordinate && (
             <NoteAction label="Ghi chú giao việc (không bắt buộc)" button="Giao đơn" onSubmit={() => act('assign_order', { p_assignee: assigneeValue || null })}>
@@ -109,7 +117,7 @@ export function OrderActions({ ctx, order, act }: { ctx: GroupCtx; order: Order;
         </Card>
       )}
 
-      {!done && (
+      {!done && (ctx.canWork || !ctx.canNote || order.issue_open) && (
         <Card className="space-y-3">
           {order.issue_open ? (
             ctx.canWork ? (

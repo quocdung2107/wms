@@ -6,7 +6,7 @@ import { errText, pushStatusLine, rpc, STATUS_LINE_PREFIX, sb } from './api'
 import { fmtDay, fmtTime } from './format'
 import { Composer } from './Composer'
 import { AttentionBadge, StatusBadge, statusOf } from './status'
-import { nextStatus } from './statusFlow'
+import { allowedTargets, nextStatus } from './statusFlow'
 import type { Attachment, GroupCtx, Message, Order } from './types'
 import { useRealtime } from './useRealtime'
 
@@ -124,6 +124,12 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
     if (u) undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS)
   }
 
+  /** Hiện nút "Bước tiếp theo" chỉ khi vai trò của mình được đổi sang bước đó (RPC vẫn kiểm lại). */
+  function canQuick(o: Order | undefined) {
+    const n = o ? nextStatus(o.status) : null
+    return !!o && !!n && allowedTargets(ctx.roles, o.assignee_id === ctx.me).includes(n)
+  }
+
   async function quick(order: Order, next: string) {
     if (quickBusy) return
     setErr('')
@@ -131,7 +137,7 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
     try {
       await rpc('change_status', { p_order: order.id, p_status: next, p_note: null })
       void pushStatusLine(ctx, order, order.status, next)
-      armUndo({ orderId: order.id, prev: order.status, until: Date.now() + UNDO_MS })
+      if (allowedTargets(ctx.roles, order.assignee_id === ctx.me).includes(order.status)) armUndo({ orderId: order.id, prev: order.status, until: Date.now() + UNDO_MS })
       setOrdersTick((n) => n + 1)
     } catch (e) {
       setErr(errText(e))
@@ -172,7 +178,7 @@ export function Chat({ ctx, orderId, onOpenOrder }: { ctx: GroupCtx; orderId: st
                 {m.body}
               </button>
             ) : m.shared_order_id ? (
-              <OrderCard order={cards.data?.get(m.shared_order_id)} loading={cards.loading} onOpen={onOpenOrder} onQuick={quick} quickBusy={quickBusy} />
+              <OrderCard order={cards.data?.get(m.shared_order_id)} loading={cards.loading} onOpen={onOpenOrder} onQuick={canQuick(cards.data?.get(m.shared_order_id)) ? quick : undefined} quickBusy={quickBusy} />
             ) : (
               <>
                 {m.attachments && m.attachments.length > 0 && (

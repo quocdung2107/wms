@@ -3,6 +3,7 @@ import { Button, Card, Field, inputClass, Notice, useLoad } from '../../shared/u
 import { pushStatusLine, rpc, sb } from './api'
 import { ago, fmtDay, fmtTime } from './format'
 import { NoteAction } from './NoteAction'
+import { allowedTargets } from './statusFlow'
 import { AttentionBadge, StatusBadge, STATUSES, statusOf } from './status'
 import type { GroupCtx, Order, OrderEvent } from './types'
 import { useRealtime } from './useRealtime'
@@ -33,7 +34,8 @@ export function CompactPanel({ ctx, orderId, onClose, onOpenFull }: { ctx: Group
     if (name === 'change_status') void pushStatusLine(ctx, { id: orderId, code: order.code }, order.status, String(args.p_status))
     data.reload()
   }
-  const next = STATUSES.filter((s) => s.code !== 'COMPLETED' && s.code !== order.status)
+  const targets = allowedTargets(ctx.roles, order.assignee_id === ctx.me)
+  const next = STATUSES.filter((s) => targets.includes(s.code) && s.code !== order.status)
   const chosen = status && next.some((s) => s.code === status) ? status : (next[0]?.code ?? '')
 
   return (
@@ -54,8 +56,9 @@ export function CompactPanel({ ctx, orderId, onClose, onOpenFull }: { ctx: Group
         {order.assignee_id ? ctx.nameOf(order.assignee_id) : 'Chưa giao'} · cập nhật {ago(order.last_activity_at)}
       </div>
 
-      {!done && ctx.canWork && (
+      {!done && ctx.canNote && (
         <>
+          {next.length > 0 && (
           <NoteAction label="Ghi chú (bắt buộc khi lùi trạng thái)" button="Cập nhật trạng thái" kind="primary" onSubmit={(note) => act('change_status', { p_status: chosen, p_note: note || null })}>
             <Field label="Trạng thái mới">
               <select className={inputClass} value={chosen} onChange={(e) => setStatus(e.target.value)}>
@@ -67,6 +70,7 @@ export function CompactPanel({ ctx, orderId, onClose, onOpenFull }: { ctx: Group
               </select>
             </Field>
           </NoteAction>
+          )}
           <NoteAction label="Order Note" button="Ghi chú" required onSubmit={(note) => act('add_note', { p_note: note })} />
         </>
       )}

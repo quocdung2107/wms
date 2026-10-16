@@ -48,7 +48,8 @@ export function GroupView({ groupId, me }: { groupId: string; me: string }) {
     nameOf: (id) => (id ? (members.data!.find((m) => m.user_id === id)?.name ?? 'Người đã rời group') : 'chưa giao'),
     isAdmin: mine.roles.includes('admin'),
     canCoordinate: mine.roles.includes('admin') || mine.roles.includes('coordinator'),
-    canWork: mine.roles.length > 0,
+    canWork: mine.roles.some((r) => r !== 'viewer'),
+    canNote: mine.roles.length > 0,
     reloadMembers: members.reload,
   }
 

@@ -65,8 +65,10 @@ export type GroupCtx = {
   isAdmin: boolean
   /** coordinator hoặc admin: tạo đơn, giao người, hoàn thành */
   canCoordinate: boolean
-  /** có ít nhất một vai trò: đổi trạng thái, ghi chú */
+  /** có vai trò làm việc (khác viewer): gửi thẻ đơn, mã vận chuyển, sự cố */
   canWork: boolean
+  /** có ít nhất một vai trò: ghi chú đơn (gồm Người theo dõi) */
+  canNote: boolean
   reloadMembers: () => void
 }
 
@@ -74,5 +76,7 @@ export const ROLES = [
   { code: 'admin', label: 'Admin' },
   { code: 'coordinator', label: 'Điều phối' },
   { code: 'operator', label: 'Người xử lý' },
+  { code: 'driver', label: 'Lái xe' },
+  { code: 'viewer', label: 'Người theo dõi' },
 ] as const
 export const roleLabel = (c: string) => ROLES.find((r) => r.code === c)?.label ?? c

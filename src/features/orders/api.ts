@@ -6,6 +6,8 @@ export const sb = () => supabase!
 
 const ERRORS: Record<string, string> = {
   forbidden: 'Bạn không có quyền làm việc này.',
+  not_assignee: 'Chỉ người được giao đơn này mới đổi được trạng thái.',
+  status_not_allowed: 'Vai trò của bạn không được đổi sang trạng thái này.',
   not_authenticated: 'Cần đăng nhập.',
   user_not_found: 'Không tìm thấy tài khoản này. Người đó cần đăng nhập app ít nhất một lần.',
   already_member: 'Người này đã ở trong group.',
@@ -80,9 +82,9 @@ export async function pushOrderCard(ctx: { groupId: string; me: string }, order:
   if (error) throw error
 }
 
-/** Thêm một dòng ngắn "CODE: A → B" vào chat chung. Chỉ gửi khi canWork; lỗi bị nuốt (đổi trạng thái đã thành công). */
-export async function pushStatusLine(ctx: { groupId: string; me: string; canWork: boolean }, order: { id: string; code: string }, from: string, to: string) {
-  if (!ctx.canWork) return
+/** Thêm một dòng ngắn "CODE: A → B" vào chat chung. Chỉ gửi khi có vai trò (canNote); lỗi bị nuốt (đổi trạng thái đã thành công). */
+export async function pushStatusLine(ctx: { groupId: string; me: string; canNote: boolean }, order: { id: string; code: string }, from: string, to: string) {
+  if (!ctx.canNote) return
   try {
     const body = `${STATUS_LINE_PREFIX}${order.code}: ${statusOf(from).label} → ${statusOf(to).label}`.slice(0, 2000)
     await sb().from('messages').insert({ group_id: ctx.groupId, sender_id: ctx.me, shared_order_id: order.id, body })
